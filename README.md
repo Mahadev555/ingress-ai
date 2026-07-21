@@ -1,2 +1,2 @@
 # ingress-ai
-A unified AI Gateway for every LLM provider. OpenAI, Anthropic, Azure OpenAI, Gemini, and more — with intelligent routing, retries, rate limits, caching, and cost tracking through one OpenAI-compatible API.
+Ingress AI is a unified AI Gateway that provides a single OpenAI-compatible API for multiple LLM providers. Instead of integrating separately with OpenAI, Anthropic, Azure OpenAI, Gemini, or other vendors, your applications connect once to Ingress AI and gain intelligent provider routing, automatic failover and retries, per-key rate limiting and quotas, response caching, observability, and detailed usage and cost tracking—all without changing client code.
