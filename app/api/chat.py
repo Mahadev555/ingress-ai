@@ -28,6 +28,25 @@ router = APIRouter()
 
 _STATUS_ERROR_TYPES = {502: "bad_gateway", 503: "upstream_unavailable"}
 
+# Disable proxy buffering so SSE chunks reach the client immediately.
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
+async def _guarded_stream(source):
+    """Relay an adapter's SSE stream, turning a mid-stream failure into a clean
+    terminal error event instead of a dropped/hung connection."""
+    try:
+        async for chunk in source:
+            yield chunk
+    except Exception:
+        logger.exception("streaming failed")
+        yield b'data: {"error": {"message": "stream interrupted", "type": "stream_error"}}\n\n'
+        yield b"data: [DONE]\n\n"
+
 
 @router.post("/chat/completions")
 async def create_chat_completion(
@@ -69,9 +88,14 @@ async def create_chat_completion(
             (c for c in candidates if not breaker.is_open(c.provider)), candidates[0]
         )
         stream_payload = payload.model_copy(update={"model": candidate.model})
+        source = candidate.adapter.stream(stream_payload, candidate.creds, client)
+        # Latency is measured after the stream drains (background runs then).
+        _record(request, background, key, candidate.provider, candidate.model,
+                None, 200, cache_hit=False, started=started)
         return StreamingResponse(
-            candidate.adapter.stream(stream_payload, candidate.creds, client),
+            _guarded_stream(source),
             media_type="text/event-stream",
+            headers=_SSE_HEADERS,
         )
 
     cache = request.app.state.cache

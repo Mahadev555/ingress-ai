@@ -93,7 +93,7 @@ uv run pytest
 - ✅ Resilience: retry with backoff, fail-over to fallback models, per-provider circuit breaker
 - ✅ Exact-match cache: hash of the normalized request, per-tenant, `X-Cache: HIT/MISS` (memory or Redis)
 - ✅ Observability: usage/cost ledger in the database, Prometheus `/metrics`, secret-redacting logs
-- ⏳ Streaming/admin/deploy polish
+- ✅ Hardened SSE (uniform error handling + anti-buffering headers), admin key CRUD, Docker deploy
 
 Every request writes a usage record (tokens, estimated cost, latency, provider,
 status, cache hit) off the hot path. `GET /admin/usage` returns totals and
@@ -120,3 +120,28 @@ same request shape for all of them:
 | `gemini-*` | Google Gemini |
 | `claude-*` | Anthropic |
 | `azure/<deployment>` | Azure OpenAI |
+
+## Admin endpoints
+
+All require the `X-Admin-Token` header (set `ADMIN_API_KEY`).
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/admin/keys` | Create a virtual key (full key returned once) |
+| `GET` | `/admin/keys` | List keys (prefix + metadata only) |
+| `DELETE` | `/admin/keys/{id}` | Revoke a key (deactivates, keeps usage history) |
+| `GET` | `/admin/usage` | Usage totals (requests, tokens, cost) |
+
+## Deploy
+
+The gateway is stateless — all state lives in Postgres and Redis — so it scales
+horizontally behind a load balancer. `docker-compose` brings up the gateway with
+both, wired to the Redis rate-limit/cache backends:
+
+```bash
+export ADMIN_API_KEY=your-admin-token
+export OPENAI_API_KEY=sk-...        # and any other provider keys you use
+docker compose up --build
+```
+
+`/health` is a readiness probe and `/metrics` is Prometheus-scrapeable.

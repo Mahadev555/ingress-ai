@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -85,6 +85,19 @@ async def list_keys(session: AsyncSession = Depends(get_session)) -> list[KeyInf
         )
         for key in result.scalars()
     ]
+
+
+@router.delete("/keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_key(
+    key_id: int, session: AsyncSession = Depends(get_session)
+) -> Response:
+    key = await session.get(VirtualKey, key_id)
+    if key is None:
+        raise HTTPException(status_code=404, detail="key not found")
+    # Deactivate rather than delete so usage history stays intact.
+    key.active = False
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 class UsageSummary(BaseModel):
