@@ -1,0 +1,17 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ig-grad" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+  </defs>
+  <rect width="48" height="48" rx="13" fill="url(#ig-grad)"/>
+  <g stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" opacity="0.95">
+    <path d="M11 15 L22.5 23"/>
+    <path d="M11 24 H22.5"/>
+    <path d="M11 33 L22.5 25"/>
+  </g>
+  <circle cx="31" cy="24" r="6.5" fill="#ffffff"/>
+  <circle cx="31" cy="24" r="3" fill="#4F46E5"/>
+  <path d="M35.5 24 H41" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round"/>
+</svg>
