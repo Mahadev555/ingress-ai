@@ -100,27 +100,36 @@ async def revoke_key(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+# Reusable token/cost aggregate columns (input, output, total, cost).
+def _usage_aggregates():
+    return (
+        func.count(UsageRecord.id),
+        func.coalesce(func.sum(UsageRecord.prompt_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.completion_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.total_tokens), 0),
+        func.coalesce(func.sum(UsageRecord.cost_usd), 0.0),
+    )
+
+
 class UsageSummary(BaseModel):
     total_requests: int
+    prompt_tokens: int  # input
+    completion_tokens: int  # output
     total_tokens: int
     total_cost_usd: float
 
 
 @router.get("/usage", response_model=UsageSummary)
 async def usage_summary(session: AsyncSession = Depends(get_session)) -> UsageSummary:
-    row = (
-        await session.execute(
-            select(
-                func.count(UsageRecord.id),
-                func.coalesce(func.sum(UsageRecord.total_tokens), 0),
-                func.coalesce(func.sum(UsageRecord.cost_usd), 0.0),
-            )
-        )
+    requests, prompt, completion, total, cost = (
+        await session.execute(select(*_usage_aggregates()))
     ).one()
     return UsageSummary(
-        total_requests=row[0],
-        total_tokens=int(row[1]),
-        total_cost_usd=round(float(row[2]), 6),
+        total_requests=requests,
+        prompt_tokens=int(prompt),
+        completion_tokens=int(completion),
+        total_tokens=int(total),
+        total_cost_usd=round(float(cost), 6),
     )
 
 
@@ -130,27 +139,23 @@ class KeyUsage(BaseModel):
     key_prefix: str
     tenant_id: str
     requests: int
-    tokens: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
     cost_usd: float
+    token_budget: Optional[int] = None
 
 
 @router.get("/usage/by-key", response_model=list[KeyUsage])
 async def usage_by_key(session: AsyncSession = Depends(get_session)) -> list[KeyUsage]:
-    """Per-key usage: requests, tokens, and cost aggregated for each key."""
+    """Per-key usage: requests, input/output/total tokens, cost, and budget."""
     rows = (
         await session.execute(
-            select(
-                UsageRecord.key_id,
-                func.count(UsageRecord.id),
-                func.coalesce(func.sum(UsageRecord.total_tokens), 0),
-                func.coalesce(func.sum(UsageRecord.cost_usd), 0.0),
-            ).group_by(UsageRecord.key_id)
+            select(UsageRecord.key_id, *_usage_aggregates()).group_by(UsageRecord.key_id)
         )
     ).all()
 
-    keys = {
-        k.id: k for k in (await session.execute(select(VirtualKey))).scalars()
-    }
+    keys = {k.id: k for k in (await session.execute(select(VirtualKey))).scalars()}
 
     usage = [
         KeyUsage(
@@ -159,10 +164,50 @@ async def usage_by_key(session: AsyncSession = Depends(get_session)) -> list[Key
             key_prefix=(keys[key_id].key_prefix if key_id in keys else "—"),
             tenant_id=(keys[key_id].tenant_id if key_id in keys else "—"),
             requests=requests,
-            tokens=int(tokens),
+            prompt_tokens=int(prompt),
+            completion_tokens=int(completion),
+            total_tokens=int(total),
+            cost_usd=round(float(cost), 6),
+            token_budget=(keys[key_id].token_budget if key_id in keys else None),
+        )
+        for key_id, requests, prompt, completion, total, cost in rows
+    ]
+    usage.sort(key=lambda u: u.total_tokens, reverse=True)
+    return usage
+
+
+class ModelUsage(BaseModel):
+    model: str
+    provider: str
+    requests: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    cost_usd: float
+
+
+@router.get("/usage/by-model", response_model=list[ModelUsage])
+async def usage_by_model(session: AsyncSession = Depends(get_session)) -> list[ModelUsage]:
+    """Per-model usage: requests, input/output/total tokens, and cost."""
+    rows = (
+        await session.execute(
+            select(UsageRecord.model, UsageRecord.provider, *_usage_aggregates()).group_by(
+                UsageRecord.model, UsageRecord.provider
+            )
+        )
+    ).all()
+
+    usage = [
+        ModelUsage(
+            model=model,
+            provider=provider,
+            requests=requests,
+            prompt_tokens=int(prompt),
+            completion_tokens=int(completion),
+            total_tokens=int(total),
             cost_usd=round(float(cost), 6),
         )
-        for key_id, requests, tokens, cost in rows
+        for model, provider, requests, prompt, completion, total, cost in rows
     ]
-    usage.sort(key=lambda u: u.tokens, reverse=True)
+    usage.sort(key=lambda u: u.total_tokens, reverse=True)
     return usage

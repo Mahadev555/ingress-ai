@@ -56,6 +56,7 @@ export function createApi({ baseUrl = "", adminToken = "" } = {}) {
     // Admin — usage
     usage: () => request(`${baseUrl}/admin/usage`, { headers: admin() }),
     usageByKey: () => request(`${baseUrl}/admin/usage/by-key`, { headers: admin() }),
+    usageByModel: () => request(`${baseUrl}/admin/usage/by-model`, { headers: admin() }),
 
     // Chat (playground) — non-streaming
     chat: (apiKey, body) =>

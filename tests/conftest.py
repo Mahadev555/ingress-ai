@@ -30,7 +30,7 @@ def make_gateway(monkeypatch):
     monkeypatch.setenv("ADMIN_API_KEY", ADMIN_TOKEN)
 
     @contextmanager
-    def factory(handler=None, allowed_models=None):
+    def factory(handler=None, allowed_models=None, token_budget=None):
         with TestClient(app) as client:
             if handler is not None:
                 app.state.http_client = httpx.AsyncClient(
@@ -39,7 +39,11 @@ def make_gateway(monkeypatch):
             created = client.post(
                 "/admin/keys",
                 headers={"X-Admin-Token": ADMIN_TOKEN},
-                json={"name": "test", "allowed_models": allowed_models or []},
+                json={
+                    "name": "test",
+                    "allowed_models": allowed_models or [],
+                    "token_budget": token_budget,
+                },
             )
             assert created.status_code == 200, created.text
             client.headers["Authorization"] = f"Bearer {created.json()['key']}"

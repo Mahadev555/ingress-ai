@@ -127,6 +127,19 @@ async def create_chat_completion(
             },
         )
 
+    if key.budget_exceeded():
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": {
+                    "message": (
+                        f"token budget exceeded: used {key.tokens_used} of {key.token_budget}"
+                    ),
+                    "type": "budget_exceeded",
+                }
+            },
+        )
+
     settings = get_settings()
     started = time.perf_counter()
 
