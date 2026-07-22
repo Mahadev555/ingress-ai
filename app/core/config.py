@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
 
+    anthropic_api_key: str = ""
+    anthropic_base_url: str = "https://api.anthropic.com"
+    anthropic_version: str = "2023-06-01"
+
+    azure_api_key: str = ""
+    azure_endpoint: str = ""
+    azure_api_version: str = "2024-02-15-preview"
+
     # Shared infrastructure (used from later build days).
     redis_url: str = "redis://localhost:6379/0"
     postgres_url: str = "postgresql+asyncpg://localhost/ingress_ai"

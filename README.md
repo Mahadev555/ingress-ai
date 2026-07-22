@@ -61,8 +61,15 @@ uv run pytest
 
 - ✅ OpenAI-compatible `/v1/chat/completions` (streaming and non-streaming) + `/health`
 - ✅ Canonical unified schema and a three-method provider adapter contract
-- ✅ Providers: OpenAI and Google Gemini, routed by model name (`gemini-*` → Gemini)
-- ⏳ Anthropic + Azure, virtual keys, rate limiting, resilience, cache, observability
+- ✅ Four providers behind one API, routed by model name
+- ⏳ Virtual keys, rate limiting, resilience, cache, observability
 
-Point any OpenAI SDK at the gateway and pass `model: "gemini-1.5-flash"` to reach
-Gemini, or `model: "gpt-4o-mini"` for OpenAI — same request shape either way.
+Point any OpenAI SDK at the gateway and choose a provider purely by model name —
+same request shape for all of them:
+
+| Model prefix | Provider |
+|---|---|
+| `gpt-*` (default) | OpenAI |
+| `gemini-*` | Google Gemini |
+| `claude-*` | Anthropic |
+| `azure/<deployment>` | Azure OpenAI |
