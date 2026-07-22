@@ -62,6 +62,47 @@ flowchart LR
 - **Observability** — usage/cost ledger (queryable per key), Prometheus `/metrics`, secret-redacting logs.
 - **Dashboard** — a React console (`client/`) for keys, a chat playground, and usage/metrics.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/overview.png" alt="Overview"><br><br>
+      <b>Overview</b><br>Live traffic feed, top models, and provider routing.
+    </td>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/usage1.png" alt="Usage trends"><br><br>
+      <b>Usage — trends</b><br>Daily requests, errors, and tokens per model.
+    </td>
+  </tr>
+  <tr><td colspan="2"><br></td></tr>
+  <tr>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/usage2.png" alt="Usage per key"><br><br>
+      <b>Usage — per key</b><br>Token/cost breakdown and budgets per virtual key.
+    </td>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/playground.png" alt="Playground"><br><br>
+      <b>Playground</b><br>Streaming chat against any model, with Markdown output.
+    </td>
+  </tr>
+</table>
+
+<br>
+
+<table>
+  <tr>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/api.png" alt="API keys" width="420"><br><br>
+      <b>API keys</b><br>Create, list, and revoke virtual keys.
+    </td>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/settings.png" alt="Settings" width="420"><br><br>
+      <b>Settings</b><br>Connect the console to your gateway URL and tokens.
+    </td>
+  </tr>
+</table>
+
 ## Dashboard
 
 A web console lives in [`client/`](client/) (React + Vite + Tailwind): create and
