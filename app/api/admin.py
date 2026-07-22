@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -211,3 +212,47 @@ async def usage_by_model(session: AsyncSession = Depends(get_session)) -> list[M
     ]
     usage.sort(key=lambda u: u.total_tokens, reverse=True)
     return usage
+
+
+class RecentRequest(BaseModel):
+    id: int
+    created_at: Optional[datetime]
+    key_prefix: str
+    provider: str
+    model: str
+    total_tokens: int
+    cost_usd: float
+    latency_ms: int
+    status: int
+    cache_hit: bool
+
+
+@router.get("/usage/recent", response_model=list[RecentRequest])
+async def usage_recent(
+    limit: int = 20, session: AsyncSession = Depends(get_session)
+) -> list[RecentRequest]:
+    """Most recent requests, newest first — powers the live activity feed."""
+    limit = max(1, min(limit, 200))
+    rows = (
+        await session.execute(
+            select(UsageRecord).order_by(UsageRecord.id.desc()).limit(limit)
+        )
+    ).scalars().all()
+
+    keys = {k.id: k for k in (await session.execute(select(VirtualKey))).scalars()}
+
+    return [
+        RecentRequest(
+            id=r.id,
+            created_at=r.created_at,
+            key_prefix=(keys[r.key_id].key_prefix if r.key_id in keys else "—"),
+            provider=r.provider,
+            model=r.model,
+            total_tokens=r.total_tokens,
+            cost_usd=round(float(r.cost_usd), 6),
+            latency_ms=r.latency_ms,
+            status=r.status,
+            cache_hit=r.cache_hit,
+        )
+        for r in rows
+    ]
