@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { AlertTriangle, Loader2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, Check, ChevronDown, Loader2, X } from "lucide-react";
 
 export function cx(...parts) {
   return parts.filter(Boolean).join(" ");
@@ -114,6 +114,79 @@ export function Select({ className = "", children, ...props }) {
     <select className={cx(inputBase, "pr-8", className)} {...props}>
       {children}
     </select>
+  );
+}
+
+// Checkbox dropdown. `value` is the list of selected options; an empty list
+// means "all" (shown as `allLabel`). onChange normalizes full/empty back to [].
+export function MultiSelect({ options, value, onChange, allLabel = "All", className = "" }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const effective = value.length === 0 ? options : value;
+  const label =
+    value.length === 0 || value.length === options.length
+      ? allLabel
+      : value.length === 1
+      ? value[0]
+      : `${value.length} selected`;
+
+  const toggle = (opt) => {
+    let next = effective.includes(opt)
+      ? effective.filter((o) => o !== opt)
+      : [...effective, opt];
+    if (next.length === 0 || next.length === options.length) next = [];
+    onChange(next);
+  };
+
+  return (
+    <div ref={ref} className={cx("relative", className)}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={options.length === 0}
+        className={cx(inputBase, "flex items-center justify-between gap-2 disabled:opacity-60")}
+      >
+        <span className="truncate">{options.length === 0 ? allLabel : label}</span>
+        <ChevronDown size={14} className="shrink-0 text-slate-400" />
+      </button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 max-h-64 w-56 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            {allLabel}
+            {value.length === 0 && <Check size={14} className="text-brand-600" />}
+          </button>
+          <div className="my-1 border-t border-slate-100" />
+          {options.map((opt) => (
+            <label
+              key={opt}
+              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+            >
+              <input
+                type="checkbox"
+                checked={effective.includes(opt)}
+                onChange={() => toggle(opt)}
+                className="h-3.5 w-3.5 accent-brand-600"
+              />
+              <span className="truncate">{opt}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Bot, Eraser, SendHorizonal, Square, User, X } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import {
+  AlertCircle,
+  Bot,
+  Check,
+  Copy,
+  Eraser,
+  SendHorizonal,
+  Square,
+  User,
+  X,
+} from "lucide-react";
 import { useSettings } from "../lib/settings.jsx";
 import { chatStream, createApi } from "../lib/api.js";
 import { useAsync } from "../lib/useAsync.js";
@@ -9,10 +21,27 @@ import { Badge, Button, Card, Field, Input, Select, Textarea, cx } from "../comp
 const DEFAULT_SYSTEM = "You are a helpful assistant.";
 const CUSTOM = "__custom__";
 
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={async () => {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+    >
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
 function Bubble({ role, content }) {
   const isUser = role === "user";
   return (
-    <div className={cx("flex gap-3", isUser && "flex-row-reverse")}>
+    <div className={cx("group flex gap-3", isUser && "flex-row-reverse")}>
       <div
         className={cx(
           "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
@@ -21,15 +50,37 @@ function Bubble({ role, content }) {
       >
         {isUser ? <User size={16} /> : <Bot size={16} />}
       </div>
-      <div
-        className={cx(
-          "max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm",
-          isUser
-            ? "rounded-tr-sm bg-brand-600 text-white"
-            : "rounded-tl-sm border border-slate-200 bg-white text-slate-800"
+      <div className="min-w-0 max-w-[80%]">
+        <div
+          className={cx(
+            "rounded-2xl px-4 py-2.5 text-sm",
+            isUser
+              ? "whitespace-pre-wrap rounded-tr-sm bg-brand-600 text-white"
+              : "rounded-tl-sm border border-slate-200 bg-white text-slate-800"
+          )}
+        >
+          {!content ? (
+            <span className="text-slate-400">…</span>
+          ) : isUser ? (
+            content
+          ) : (
+            <div className="prose prose-sm prose-slate max-w-none break-words prose-pre:bg-slate-900 prose-pre:text-slate-100">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  a: (props) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+                }}
+              >
+                {content}
+              </ReactMarkdown>
+            </div>
+          )}
+        </div>
+        {!isUser && content && (
+          <div className="mt-1 opacity-0 transition-opacity group-hover:opacity-100">
+            <CopyButton text={content} />
+          </div>
         )}
-      >
-        {content || <span className="text-slate-400">…</span>}
       </div>
     </div>
   );

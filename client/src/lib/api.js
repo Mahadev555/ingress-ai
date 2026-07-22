@@ -55,9 +55,14 @@ export function createApi({ baseUrl = "", adminToken = "" } = {}) {
       request(`${baseUrl}/admin/keys/${id}`, { method: "DELETE", headers: admin() }),
 
     // Admin — usage
-    usage: () => request(`${baseUrl}/admin/usage`, { headers: admin() }),
+    usage: (days = 0) =>
+      request(`${baseUrl}/admin/usage${days ? `?days=${days}` : ""}`, { headers: admin() }),
     usageByKey: () => request(`${baseUrl}/admin/usage/by-key`, { headers: admin() }),
     usageByModel: () => request(`${baseUrl}/admin/usage/by-model`, { headers: admin() }),
+    usageRecent: (limit = 20) =>
+      request(`${baseUrl}/admin/usage/recent?limit=${limit}`, { headers: admin() }),
+    usageTimeseries: (days = 14) =>
+      request(`${baseUrl}/admin/usage/timeseries?days=${days}`, { headers: admin() }),
 
     // Chat (playground) — non-streaming
     chat: (apiKey, body) =>
