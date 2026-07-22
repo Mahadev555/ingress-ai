@@ -1,19 +1,8 @@
-import { Link } from "react-router-dom";
-import {
-  Activity,
-  Coins,
-  Cpu,
-  KeyRound,
-  Layers,
-  ArrowRight,
-  Zap,
-  RefreshCw,
-  Database,
-} from "lucide-react";
+import { Activity, Coins, Cpu, KeyRound, Layers, Zap, RefreshCw, Database } from "lucide-react";
 import { useSettings } from "../lib/settings.jsx";
 import { useAsync } from "../lib/useAsync.js";
 import { PROVIDER_ROUTES } from "../lib/models.js";
-import { Badge, Button, Card, CardHeader, cx, EmptyState, ErrorState, Spinner } from "../components/ui.jsx";
+import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, Spinner } from "../components/ui.jsx";
 import { ConnectPrompt } from "../components/ConnectPrompt.jsx";
 
 // Provider → accent color, used for the feed dots and the top-models bars.
@@ -27,6 +16,11 @@ const providerColor = (p) => PROVIDER_COLOR[p] ?? "#6366f1";
 
 function fmt(n) {
   return new Intl.NumberFormat().format(n ?? 0);
+}
+
+function fmtLatency(ms) {
+  if (!ms) return "—";
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 }
 
 function relTime(iso) {
@@ -45,40 +39,19 @@ function statusTone(status) {
   return "green";
 }
 
-function Stat({ icon: Icon, label, value, sub }) {
+function Stat({ icon: Icon, label, value }) {
   return (
-    <Card className="p-5">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          {label}
+    <Card className="px-4 py-3">
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500">
+          <Icon size={15} />
         </span>
-        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
-          <Icon size={18} />
-        </span>
+        <div className="min-w-0">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{label}</div>
+          <div className="text-lg font-bold leading-tight text-slate-900">{value}</div>
+        </div>
       </div>
-      <div className="mt-3 text-2xl font-bold tracking-tight text-slate-900">{value}</div>
-      {sub && <div className="mt-1 text-xs text-slate-400">{sub}</div>}
     </Card>
-  );
-}
-
-// Tiny bar chart of per-request token totals (oldest → newest, left → right).
-function Sparkbars({ values }) {
-  if (!values.length) {
-    return <div className="h-14 rounded-lg bg-slate-50" />;
-  }
-  const max = Math.max(1, ...values);
-  return (
-    <div className="flex h-14 items-end gap-[3px]">
-      {values.map((v, i) => (
-        <div
-          key={i}
-          title={`${fmt(v)} tokens`}
-          className="flex-1 rounded-sm bg-gradient-to-t from-brand-500/60 to-brand-500"
-          style={{ height: `${Math.max(8, (v / max) * 100)}%` }}
-        />
-      ))}
-    </div>
   );
 }
 
@@ -96,12 +69,8 @@ export default function Overview() {
 
   const u = usage.data ?? {};
   const activeKeys = (keys.data ?? []).filter((k) => k.active).length;
-
   const feed = recent.data ?? [];
-  // Oldest → newest for the sparkline (the feed itself is newest-first).
-  const spark = [...feed].reverse().map((r) => r.total_tokens);
-
-  const models = (byModel.data ?? []).slice(0, 5);
+  const models = (byModel.data ?? []).filter((m) => m.total_tokens > 0).slice(0, 5);
   const modelMax = Math.max(1, ...models.map((m) => m.total_tokens));
 
   const refreshAll = () => {
@@ -119,16 +88,11 @@ export default function Overview() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat icon={Activity} label="Requests" value={fmt(u.total_requests)} sub="all time" />
-        <Stat icon={Cpu} label="Tokens" value={fmt(u.total_tokens)} sub="prompt + completion" />
-        <Stat
-          icon={Coins}
-          label="Est. cost"
-          value={`$${(u.total_cost_usd ?? 0).toFixed(4)}`}
-          sub="across all providers"
-        />
-        <Stat icon={KeyRound} label="Active keys" value={fmt(activeKeys)} sub={`${keys.data?.length ?? 0} total`} />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Stat icon={Activity} label="Requests" value={fmt(u.total_requests)} />
+        <Stat icon={Cpu} label="Tokens" value={fmt(u.total_tokens)} />
+        <Stat icon={Coins} label="Est. cost" value={`$${(u.total_cost_usd ?? 0).toFixed(4)}`} />
+        <Stat icon={KeyRound} label="Active keys" value={fmt(activeKeys)} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -137,19 +101,13 @@ export default function Overview() {
           <CardHeader
             title="Live traffic"
             subtitle="Most recent requests through the gateway"
-            action={<Badge tone="brand">last {feed.length}</Badge>}
           />
-          <div className="px-5 pt-4">
-            <Sparkbars values={spark} />
-            <div className="mt-1 text-[11px] text-slate-400">tokens per request · oldest → newest</div>
-          </div>
-
-          <div className="mt-2 max-h-[22rem] divide-y divide-slate-100 overflow-y-auto">
+          <div className="max-h-[26rem] divide-y divide-slate-100 overflow-y-auto">
             {feed.length === 0 ? (
               <EmptyState
                 icon={Zap}
                 title="No requests yet"
-                description="Send one from the playground to see it stream in here."
+                description="Send one from the playground to see it appear here."
               />
             ) : (
               feed.map((r) => (
@@ -168,7 +126,7 @@ export default function Overview() {
                     {fmt(r.total_tokens)} tok
                   </span>
                   <span className="hidden w-14 text-right tabular-nums text-slate-400 sm:block">
-                    {r.latency_ms}ms
+                    {fmtLatency(r.latency_ms)}
                   </span>
                   <span className="w-16 text-right text-xs text-slate-400">{relTime(r.created_at)}</span>
                 </div>
@@ -177,59 +135,36 @@ export default function Overview() {
           </div>
         </Card>
 
-        {/* Top models + quick actions */}
-        <div className="space-y-6">
-          <Card>
-            <CardHeader title="Top models" subtitle="By total tokens" />
-            <div className="space-y-3 p-5">
-              {models.length === 0 ? (
-                <p className="py-4 text-center text-sm text-slate-400">No usage yet.</p>
-              ) : (
-                models.map((m) => (
-                  <div key={`${m.provider}:${m.model}`}>
-                    <div className="mb-1 flex items-center justify-between text-xs">
-                      <code className="truncate font-medium text-slate-700">{m.model}</code>
-                      <span className="shrink-0 tabular-nums text-slate-500">{fmt(m.total_tokens)}</span>
-                    </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${(m.total_tokens / modelMax) * 100}%`,
-                          backgroundColor: providerColor(m.provider),
-                        }}
-                      />
-                    </div>
+        {/* Top models */}
+        <Card>
+          <CardHeader title="Top models" subtitle="By total tokens" />
+          <div className="space-y-3 p-5">
+            {models.length === 0 ? (
+              <p className="py-4 text-center text-sm text-slate-400">No usage yet.</p>
+            ) : (
+              models.map((m) => (
+                <div key={`${m.provider}:${m.model}`}>
+                  <div className="mb-1 flex items-center justify-between text-xs">
+                    <code className="truncate font-medium text-slate-700">{m.model}</code>
+                    <span className="shrink-0 tabular-nums text-slate-500">{fmt(m.total_tokens)}</span>
                   </div>
-                ))
-              )}
-            </div>
-          </Card>
-
-          <Card className="flex flex-col">
-            <CardHeader title="Quick actions" />
-            <div className="flex flex-1 flex-col gap-2 p-4">
-              <Link to="/keys">
-                <Button variant="secondary" className="w-full justify-between">
-                  Create an API key <ArrowRight size={15} />
-                </Button>
-              </Link>
-              <Link to="/playground">
-                <Button variant="secondary" className="w-full justify-between">
-                  Open the playground <ArrowRight size={15} />
-                </Button>
-              </Link>
-              <Link to="/usage">
-                <Button variant="secondary" className="w-full justify-between">
-                  View usage &amp; metrics <ArrowRight size={15} />
-                </Button>
-              </Link>
-            </div>
-          </Card>
-        </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${Math.max(3, (m.total_tokens / modelMax) * 100)}%`,
+                        backgroundColor: providerColor(m.provider),
+                      }}
+                    />
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
       </div>
 
-      {/* Provider routing — reference, demoted below the live data */}
+      {/* Provider routing — how model names map to upstream providers */}
       <Card>
         <CardHeader
           title="Provider routing"
