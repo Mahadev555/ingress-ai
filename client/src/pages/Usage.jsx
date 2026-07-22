@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import {
   Activity,
   ArrowDownToLine,
@@ -20,9 +20,14 @@ import {
   cx,
   EmptyState,
   ErrorState,
+  Select,
   Spinner,
 } from "../components/ui.jsx";
 import { ConnectPrompt } from "../components/ConnectPrompt.jsx";
+
+// Recharts is heavy, so it's split into its own chunk that only loads when
+// the Usage page is opened.
+const UsageCharts = lazy(() => import("../components/UsageCharts.jsx"));
 
 const fmt = (n) => new Intl.NumberFormat().format(n ?? 0);
 
@@ -92,11 +97,15 @@ function TokenCells({ row }) {
   );
 }
 
+const RANGES = [7, 14, 30];
+
 export default function Usage() {
   const { api, hasAdmin } = useSettings();
+  const [days, setDays] = useState(14);
   const usage = useAsync(() => api.usage(), [api], { enabled: hasAdmin });
   const byKey = useAsync(() => api.usageByKey(), [api], { enabled: hasAdmin });
   const byModel = useAsync(() => api.usageByModel(), [api], { enabled: hasAdmin });
+  const series = useAsync(() => api.usageTimeseries(days), [api, days], { enabled: hasAdmin });
   const [metrics, setMetrics] = useState(null);
   const [loadingMetrics, setLoadingMetrics] = useState(false);
 
@@ -129,6 +138,35 @@ export default function Usage() {
           <Stat icon={Cpu} label="Total tokens" value={fmt(u.total_tokens)} tone="brand" />
           <Stat icon={Coins} label="Est. cost" value={`$${(u.total_cost_usd ?? 0).toFixed(4)}`} tone="amber" />
         </div>
+      )}
+
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900">Usage over time</h2>
+          <p className="text-xs text-slate-500">Daily trends, grouped by model and status.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select value={days} onChange={(e) => setDays(Number(e.target.value))} className="w-auto">
+            {RANGES.map((d) => (
+              <option key={d} value={d}>
+                Last {d} days
+              </option>
+            ))}
+          </Select>
+          <Button variant="ghost" onClick={series.reload}>
+            <RefreshCw size={14} /> Refresh
+          </Button>
+        </div>
+      </div>
+
+      {series.loading ? (
+        <Spinner />
+      ) : series.error ? (
+        <ErrorState error={series.error} onRetry={series.reload} />
+      ) : (
+        <Suspense fallback={<Spinner label="Loading charts…" />}>
+          <UsageCharts rows={series.data} days={days} />
+        </Suspense>
       )}
 
       <Card>

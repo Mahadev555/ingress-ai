@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -255,4 +255,61 @@ async def usage_recent(
             cache_hit=r.cache_hit,
         )
         for r in rows
+    ]
+
+
+class TimeseriesPoint(BaseModel):
+    day: str  # YYYY-MM-DD (UTC)
+    model: str
+    provider: str
+    status: int
+    requests: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    cost_usd: float
+
+
+@router.get("/usage/timeseries", response_model=list[TimeseriesPoint])
+async def usage_timeseries(
+    days: int = 14, session: AsyncSession = Depends(get_session)
+) -> list[TimeseriesPoint]:
+    """Daily usage grouped by (day, model, provider, status).
+
+    Returned flat so the dashboard can pivot it into per-model token lines, a
+    requests/success-rate chart, and an errors-by-status chart. `func.date()`
+    buckets by day on both SQLite (dev) and Postgres (prod).
+    """
+    days = max(1, min(days, 90))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    day = func.date(UsageRecord.created_at).label("day")
+
+    rows = (
+        await session.execute(
+            select(
+                day,
+                UsageRecord.model,
+                UsageRecord.provider,
+                UsageRecord.status,
+                *_usage_aggregates(),
+            )
+            .where(UsageRecord.created_at >= cutoff)
+            .group_by(day, UsageRecord.model, UsageRecord.provider, UsageRecord.status)
+            .order_by(day)
+        )
+    ).all()
+
+    return [
+        TimeseriesPoint(
+            day=str(d),
+            model=model,
+            provider=provider,
+            status=st,
+            requests=requests,
+            prompt_tokens=int(prompt),
+            completion_tokens=int(completion),
+            total_tokens=int(total),
+            cost_usd=round(float(cost), 6),
+        )
+        for d, model, provider, st, requests, prompt, completion, total, cost in rows
     ]

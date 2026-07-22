@@ -60,6 +60,8 @@ export function createApi({ baseUrl = "", adminToken = "" } = {}) {
     usageByModel: () => request(`${baseUrl}/admin/usage/by-model`, { headers: admin() }),
     usageRecent: (limit = 20) =>
       request(`${baseUrl}/admin/usage/recent?limit=${limit}`, { headers: admin() }),
+    usageTimeseries: (days = 14) =>
+      request(`${baseUrl}/admin/usage/timeseries?days=${days}`, { headers: admin() }),
 
     // Chat (playground) — non-streaming
     chat: (apiKey, body) =>
