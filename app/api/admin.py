@@ -122,3 +122,47 @@ async def usage_summary(session: AsyncSession = Depends(get_session)) -> UsageSu
         total_tokens=int(row[1]),
         total_cost_usd=round(float(row[2]), 6),
     )
+
+
+class KeyUsage(BaseModel):
+    key_id: int
+    name: str
+    key_prefix: str
+    tenant_id: str
+    requests: int
+    tokens: int
+    cost_usd: float
+
+
+@router.get("/usage/by-key", response_model=list[KeyUsage])
+async def usage_by_key(session: AsyncSession = Depends(get_session)) -> list[KeyUsage]:
+    """Per-key usage: requests, tokens, and cost aggregated for each key."""
+    rows = (
+        await session.execute(
+            select(
+                UsageRecord.key_id,
+                func.count(UsageRecord.id),
+                func.coalesce(func.sum(UsageRecord.total_tokens), 0),
+                func.coalesce(func.sum(UsageRecord.cost_usd), 0.0),
+            ).group_by(UsageRecord.key_id)
+        )
+    ).all()
+
+    keys = {
+        k.id: k for k in (await session.execute(select(VirtualKey))).scalars()
+    }
+
+    usage = [
+        KeyUsage(
+            key_id=key_id,
+            name=(keys[key_id].name if key_id in keys else "(deleted key)"),
+            key_prefix=(keys[key_id].key_prefix if key_id in keys else "—"),
+            tenant_id=(keys[key_id].tenant_id if key_id in keys else "—"),
+            requests=requests,
+            tokens=int(tokens),
+            cost_usd=round(float(cost), 6),
+        )
+        for key_id, requests, tokens, cost in rows
+    ]
+    usage.sort(key=lambda u: u.tokens, reverse=True)
+    return usage

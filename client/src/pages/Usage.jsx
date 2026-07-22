@@ -1,9 +1,20 @@
 import { useState } from "react";
-import { Activity, Coins, Cpu, Gauge, RefreshCw } from "lucide-react";
+import { Activity, Coins, Cpu, Gauge, KeyRound, RefreshCw } from "lucide-react";
 import { useSettings } from "../lib/settings.jsx";
 import { useAsync } from "../lib/useAsync.js";
-import { Button, Card, CardHeader, cx, ErrorState, Spinner } from "../components/ui.jsx";
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  cx,
+  EmptyState,
+  ErrorState,
+  Spinner,
+} from "../components/ui.jsx";
 import { ConnectPrompt } from "../components/ConnectPrompt.jsx";
+
+const fmt = (n) => new Intl.NumberFormat().format(n ?? 0);
 
 function Stat({ icon: Icon, label, value, tone }) {
   const tones = {
@@ -29,6 +40,7 @@ function Stat({ icon: Icon, label, value, tone }) {
 export default function Usage() {
   const { api, hasAdmin } = useSettings();
   const usage = useAsync(() => api.usage(), [api], { enabled: hasAdmin });
+  const byKey = useAsync(() => api.usageByKey(), [api], { enabled: hasAdmin });
   const [metrics, setMetrics] = useState(null);
   const [loadingMetrics, setLoadingMetrics] = useState(false);
 
@@ -55,11 +67,71 @@ export default function Usage() {
         <ErrorState error={usage.error} onRetry={usage.reload} />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Stat icon={Activity} label="Requests" value={new Intl.NumberFormat().format(u.total_requests ?? 0)} tone="brand" />
-          <Stat icon={Cpu} label="Tokens" value={new Intl.NumberFormat().format(u.total_tokens ?? 0)} tone="emerald" />
+          <Stat icon={Activity} label="Requests" value={fmt(u.total_requests)} tone="brand" />
+          <Stat icon={Cpu} label="Tokens" value={fmt(u.total_tokens)} tone="emerald" />
           <Stat icon={Coins} label="Est. cost" value={`$${(u.total_cost_usd ?? 0).toFixed(4)}`} tone="amber" />
         </div>
       )}
+
+      <Card>
+        <CardHeader
+          title="Usage by key"
+          subtitle="Tokens and cost attributed to each virtual key."
+          action={
+            <Button variant="ghost" onClick={byKey.reload}>
+              <RefreshCw size={14} /> Refresh
+            </Button>
+          }
+        />
+        {byKey.loading ? (
+          <Spinner />
+        ) : byKey.error ? (
+          <ErrorState error={byKey.error} onRetry={byKey.reload} />
+        ) : byKey.data.length === 0 ? (
+          <EmptyState
+            icon={KeyRound}
+            title="No usage yet"
+            description="Send a request with a virtual key to see per-key usage here."
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-400">
+                  <th className="px-5 py-3 font-semibold">Key</th>
+                  <th className="px-5 py-3 font-semibold">Name</th>
+                  <th className="px-5 py-3 font-semibold">Tenant</th>
+                  <th className="px-5 py-3 text-right font-semibold">Requests</th>
+                  <th className="px-5 py-3 text-right font-semibold">Tokens</th>
+                  <th className="px-5 py-3 text-right font-semibold">Cost</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {byKey.data.map((k) => (
+                  <tr key={k.key_id} className="hover:bg-slate-50/60">
+                    <td className="px-5 py-3">
+                      <code className="rounded bg-slate-100 px-2 py-1 font-mono text-xs text-slate-600">
+                        {k.key_prefix}…
+                      </code>
+                    </td>
+                    <td className="px-5 py-3 font-medium text-slate-800">{k.name || "—"}</td>
+                    <td className="px-5 py-3">
+                      <Badge tone="slate">{k.tenant_id}</Badge>
+                    </td>
+                    <td className="px-5 py-3 text-right tabular-nums text-slate-700">{fmt(k.requests)}</td>
+                    <td className="px-5 py-3 text-right tabular-nums font-semibold text-slate-900">
+                      {fmt(k.tokens)}
+                    </td>
+                    <td className="px-5 py-3 text-right tabular-nums text-slate-700">
+                      ${k.cost_usd.toFixed(4)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
 
       <Card>
         <CardHeader

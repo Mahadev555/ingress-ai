@@ -71,6 +71,18 @@ def test_usage_is_recorded(make_gateway):
     assert summary["total_cost_usd"] > 0
 
 
+def test_usage_by_key_attributes_tokens(make_gateway):
+    with make_gateway(_ok) as client:
+        client.post("/v1/chat/completions", json=CHAT_BODY)
+        by_key = client.get("/admin/usage/by-key", headers={"X-Admin-Token": ADMIN_TOKEN}).json()
+
+    assert len(by_key) == 1
+    row = by_key[0]
+    assert row["name"] == "test"  # the key make_gateway created
+    assert row["requests"] == 1
+    assert row["tokens"] == 8  # COMPLETION usage total
+
+
 def test_metrics_endpoint_exposes_counters(make_gateway):
     with make_gateway(_ok) as client:
         client.post("/v1/chat/completions", json=CHAT_BODY)
