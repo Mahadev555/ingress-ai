@@ -1,0 +1,11 @@
+.git
+.venv
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+.env
+*.sqlite
+*.sqlite3
+ingress.db
+plan/

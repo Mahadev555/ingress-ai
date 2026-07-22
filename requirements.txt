@@ -1,8 +1,0 @@
-fastapi
-uvicorn[standard]
-pydantic
-pydantic-settings
-sqlalchemy
-asyncpg
-redis
-prometheus_client

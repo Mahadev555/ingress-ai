@@ -1,0 +1,80 @@
+"""Day 10: SSE hardening and admin key CRUD (revoke)."""
+
+import httpx
+
+from tests.conftest import ADMIN_TOKEN
+
+CHAT_BODY = {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]}
+STREAM_BODY = {**CHAT_BODY, "stream": True}
+
+COMPLETION = {
+    "id": "chatcmpl-1",
+    "object": "chat.completion",
+    "created": 0,
+    "model": "gpt-4o-mini",
+    "choices": [
+        {"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}
+    ],
+    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+}
+
+
+def test_streaming_sets_anti_buffering_headers(make_gateway):
+    sse = b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n'
+
+    async def body():
+        yield sse
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body())
+
+    with make_gateway(handler) as client:
+        resp = client.post("/v1/chat/completions", json=STREAM_BODY)
+
+    assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "no-cache"
+    assert resp.headers["x-accel-buffering"] == "no"
+    assert resp.content == sse
+
+
+def test_mid_stream_failure_becomes_terminal_error_event(make_gateway):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("boom")
+
+    with make_gateway(handler) as client:
+        resp = client.post("/v1/chat/completions", json=STREAM_BODY)
+
+    text = resp.text
+    # The stream did not hang or 500 — it closed with a clean error + DONE.
+    assert '"type": "stream_error"' in text
+    assert text.rstrip().endswith("data: [DONE]")
+
+
+def test_revoked_key_is_rejected(make_gateway):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=COMPLETION)
+
+    with make_gateway(handler) as client:
+        created = client.post(
+            "/admin/keys",
+            headers={"X-Admin-Token": ADMIN_TOKEN},
+            json={"name": "temp"},
+        ).json()
+        client.headers["Authorization"] = f"Bearer {created['key']}"
+
+        before = client.post("/v1/chat/completions", json=CHAT_BODY)
+
+        revoke = client.delete(
+            f"/admin/keys/{created['id']}", headers={"X-Admin-Token": ADMIN_TOKEN}
+        )
+        after = client.post("/v1/chat/completions", json=CHAT_BODY)
+
+    assert before.status_code == 200
+    assert revoke.status_code == 204
+    assert after.status_code == 401  # revoked key no longer authenticates
+
+
+def test_revoke_unknown_key_returns_404(make_gateway):
+    with make_gateway() as client:
+        resp = client.delete("/admin/keys/9999", headers={"X-Admin-Token": ADMIN_TOKEN})
+    assert resp.status_code == 404

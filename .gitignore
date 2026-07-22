@@ -60,6 +60,9 @@ cover/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+ingress.db
+*.sqlite
+*.sqlite3
 
 # Flask stuff:
 instance/
@@ -216,3 +219,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+/.claude
+/plan
