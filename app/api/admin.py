@@ -2,12 +2,12 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_admin
 from app.core.auth import generate_key
-from app.db.models import VirtualKey
+from app.db.models import UsageRecord, VirtualKey
 from app.db.session import get_session
 
 router = APIRouter(dependencies=[Depends(require_admin)])
@@ -85,3 +85,27 @@ async def list_keys(session: AsyncSession = Depends(get_session)) -> list[KeyInf
         )
         for key in result.scalars()
     ]
+
+
+class UsageSummary(BaseModel):
+    total_requests: int
+    total_tokens: int
+    total_cost_usd: float
+
+
+@router.get("/usage", response_model=UsageSummary)
+async def usage_summary(session: AsyncSession = Depends(get_session)) -> UsageSummary:
+    row = (
+        await session.execute(
+            select(
+                func.count(UsageRecord.id),
+                func.coalesce(func.sum(UsageRecord.total_tokens), 0),
+                func.coalesce(func.sum(UsageRecord.cost_usd), 0.0),
+            )
+        )
+    ).one()
+    return UsageSummary(
+        total_requests=row[0],
+        total_tokens=int(row[1]),
+        total_cost_usd=round(float(row[2]), 6),
+    )

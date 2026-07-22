@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api import admin, chat
@@ -9,6 +9,8 @@ from app.core.cache import create_cache
 from app.core.config import get_settings
 from app.core.ratelimit import create_rate_limiter
 from app.db.session import create_engine, init_models
+from app.observability.logging import configure_logging
+from app.observability.metrics import render_latest
 from app.router.health import CircuitBreaker
 
 
@@ -20,6 +22,7 @@ async def lifespan(app: FastAPI):
     lives in the database, so any replica can serve any request.
     """
     settings = get_settings()
+    configure_logging()
 
     app.state.http_client = httpx.AsyncClient(timeout=settings.request_timeout)
 
@@ -53,3 +56,9 @@ app.include_router(admin.router, prefix="/admin")
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+async def metrics() -> Response:
+    payload, content_type = render_latest()
+    return Response(content=payload, media_type=content_type)

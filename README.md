@@ -92,7 +92,12 @@ uv run pytest
 - ✅ Rate limiting: token bucket per key + model, `429` + `Retry-After` (memory or Redis)
 - ✅ Resilience: retry with backoff, fail-over to fallback models, per-provider circuit breaker
 - ✅ Exact-match cache: hash of the normalized request, per-tenant, `X-Cache: HIT/MISS` (memory or Redis)
-- ⏳ Observability, streaming/admin/deploy polish
+- ✅ Observability: usage/cost ledger in the database, Prometheus `/metrics`, secret-redacting logs
+- ⏳ Streaming/admin/deploy polish
+
+Every request writes a usage record (tokens, estimated cost, latency, provider,
+status, cache hit) off the hot path. `GET /admin/usage` returns totals and
+`GET /metrics` exposes Prometheus counters/histograms.
 
 Add a `fallbacks` list to any request and the gateway retries transient failures,
 then fails over to the next model (possibly a different provider) if the primary
