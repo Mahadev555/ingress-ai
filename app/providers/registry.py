@@ -1,14 +1,18 @@
 from app.core.config import Settings
 from app.providers.base import ProviderAdapter, ProviderCreds
+from app.providers.gemini import GeminiAdapter
 from app.providers.openai import OpenAIAdapter
 
 ADAPTERS: dict[str, ProviderAdapter] = {
     "openai": OpenAIAdapter(),
+    "gemini": GeminiAdapter(),
 }
 
 # Ordered (prefix, provider) rules. First match wins; unmatched models fall
 # back to OpenAI, which keeps the gateway a transparent proxy by default.
-MODEL_PREFIXES: list[tuple[str, str]] = []
+MODEL_PREFIXES: list[tuple[str, str]] = [
+    ("gemini", "gemini"),
+]
 
 DEFAULT_PROVIDER = "openai"
 
@@ -23,6 +27,8 @@ def provider_for_model(model: str) -> str:
 def creds_for_provider(provider: str, settings: Settings) -> ProviderCreds:
     if provider == "openai":
         return ProviderCreds(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
+    if provider == "gemini":
+        return ProviderCreds(api_key=settings.gemini_api_key, base_url=settings.gemini_base_url)
     raise KeyError(f"no credentials configured for provider {provider!r}")
 
 

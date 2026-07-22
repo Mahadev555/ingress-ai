@@ -8,9 +8,12 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Upstream provider (OpenAI passthrough for now).
+    # Upstream providers.
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
+
+    gemini_api_key: str = ""
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
 
     # Shared infrastructure (used from later build days).
     redis_url: str = "redis://localhost:6379/0"
