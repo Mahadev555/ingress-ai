@@ -8,6 +8,7 @@ from app.api import admin, chat
 from app.core.config import get_settings
 from app.core.ratelimit import create_rate_limiter
 from app.db.session import create_engine, init_models
+from app.router.health import CircuitBreaker
 
 
 @asynccontextmanager
@@ -27,6 +28,10 @@ async def lifespan(app: FastAPI):
     app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     app.state.rate_limiter = create_rate_limiter(settings)
+    app.state.circuit_breaker = CircuitBreaker(
+        fail_threshold=settings.circuit_fail_threshold,
+        reset_timeout=settings.circuit_reset_seconds,
+    )
 
     try:
         yield

@@ -90,7 +90,20 @@ uv run pytest
 - ✅ Four providers behind one API, routed by model name
 - ✅ Virtual keys + auth: hashed keys, per-key allowed models, admin key management
 - ✅ Rate limiting: token bucket per key + model, `429` + `Retry-After` (memory or Redis)
-- ⏳ Resilience (retry/fallback), cache, observability
+- ✅ Resilience: retry with backoff, fail-over to fallback models, per-provider circuit breaker
+- ⏳ Cache, observability
+
+Add a `fallbacks` list to any request and the gateway retries transient failures,
+then fails over to the next model (possibly a different provider) if the primary
+stays down:
+
+```json
+{
+  "model": "gpt-4o-mini",
+  "messages": [{"role": "user", "content": "Hello!"}],
+  "fallbacks": ["claude-3-5-sonnet", "gemini-1.5-flash"]
+}
+```
 
 Point any OpenAI SDK at the gateway and choose a provider purely by model name —
 same request shape for all of them:

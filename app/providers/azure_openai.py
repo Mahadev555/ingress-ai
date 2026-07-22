@@ -1,6 +1,6 @@
 from app.providers.base import NativeRequest, ProviderCreds
 from app.providers.openai import OpenAIAdapter
-from app.schemas.unified import ChatCompletionRequest
+from app.schemas.unified import GATEWAY_ONLY_FIELDS, ChatCompletionRequest
 
 # Models are addressed as "azure/<deployment>"; this prefix selects the adapter
 # and is stripped to recover the Azure deployment name.
@@ -18,7 +18,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         deployment = _deployment_name(req.model)
         api_version = creds.extra.get("api_version", "")
 
-        body = req.model_dump(exclude_none=True)
+        body = req.model_dump(exclude_none=True, exclude=GATEWAY_ONLY_FIELDS)
         body["model"] = deployment
 
         return NativeRequest(

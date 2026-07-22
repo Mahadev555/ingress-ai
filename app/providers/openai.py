@@ -3,7 +3,7 @@ from typing import Any, AsyncIterator
 import httpx
 
 from app.providers.base import NativeRequest, ProviderAdapter, ProviderCreds
-from app.schemas.unified import ChatCompletionRequest, ChatCompletionResponse
+from app.schemas.unified import GATEWAY_ONLY_FIELDS, ChatCompletionRequest, ChatCompletionResponse
 
 
 class OpenAIAdapter(ProviderAdapter):
@@ -17,7 +17,7 @@ class OpenAIAdapter(ProviderAdapter):
                 "Authorization": f"Bearer {creds.api_key}",
                 "Content-Type": "application/json",
             },
-            json=req.model_dump(exclude_none=True),
+            json=req.model_dump(exclude_none=True, exclude=GATEWAY_ONLY_FIELDS),
         )
 
     def parse_response(self, payload: dict[str, Any]) -> ChatCompletionResponse:

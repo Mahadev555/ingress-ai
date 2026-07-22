@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     # "memory" (single instance / dev) or "redis" (multi-replica production).
     rate_limit_backend: str = "memory"
 
+    # Resilience: retry (per candidate) + circuit breaker (per provider).
+    retry_attempts: int = 3
+    retry_base_delay: float = 0.05
+    retry_max_delay: float = 2.0
+    circuit_fail_threshold: int = 5
+    circuit_reset_seconds: float = 30.0
+
     # Upstream HTTP timeout, in seconds.
     request_timeout: float = 60.0
 

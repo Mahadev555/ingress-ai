@@ -10,6 +10,10 @@ class Message(BaseModel):
     content: Optional[Any] = None
 
 
+# Gateway-only request fields that must not be forwarded to providers.
+GATEWAY_ONLY_FIELDS = {"fallbacks"}
+
+
 class ChatCompletionRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -19,6 +23,8 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: Optional[int] = None
     top_p: Optional[float] = None
     stream: bool = False
+    # Ordered fallback models tried if the primary fails (gateway-only).
+    fallbacks: Optional[list[str]] = None
 
 
 class Choice(BaseModel):

@@ -9,10 +9,14 @@ from app.api.deps import require_key
 from app.core.auth import KeyContext
 from app.core.config import get_settings
 from app.core.ratelimit import bucket_name, bucket_params
-from app.providers.registry import resolve_model
+from app.resilience.fallback import Failure, Success, execute_with_fallback
+from app.resilience.retry import RetryConfig
+from app.router.selector import build_candidates
 from app.schemas.unified import ChatCompletionRequest
 
 router = APIRouter()
+
+_STATUS_ERROR_TYPES = {502: "bad_gateway", 503: "upstream_unavailable"}
 
 
 @router.post("/chat/completions")
@@ -36,43 +40,55 @@ async def create_chat_completion(
 
     if settings.rate_limit_enabled:
         rate, capacity = bucket_params(settings.rate_limit_per_minute)
-        result = await request.app.state.rate_limiter.acquire(
+        limit = await request.app.state.rate_limiter.acquire(
             bucket_name(key.key_id, payload.model), rate, capacity
         )
-        if not result.allowed:
-            return _rate_limited(result.retry_after)
+        if not limit.allowed:
+            return _rate_limited(limit.retry_after)
 
     client: httpx.AsyncClient = request.app.state.http_client
-    adapter, creds = resolve_model(payload.model, settings)
+    candidates = build_candidates(payload.model, payload.fallbacks or [], settings)
 
+    # Streaming holds a live connection, so fail-over isn't possible mid-stream;
+    # use the first healthy candidate.
     if payload.stream:
+        breaker = request.app.state.circuit_breaker
+        candidate = next(
+            (c for c in candidates if not breaker.is_open(c.provider)), candidates[0]
+        )
+        stream_payload = payload.model_copy(update={"model": candidate.model})
         return StreamingResponse(
-            adapter.stream(payload, creds, client),
+            candidate.adapter.stream(stream_payload, candidate.creds, client),
             media_type="text/event-stream",
         )
 
-    native = adapter.build_request(payload, creds)
-    try:
-        upstream = await client.request(
-            native.method, native.url, headers=native.headers, json=native.json
-        )
-    except httpx.RequestError as exc:
-        return _bad_gateway(str(exc))
-
-    # Relay upstream errors (auth, rate limit, etc.) untouched so clients see
-    # the provider's own error body and status.
-    if upstream.status_code != 200:
-        return JSONResponse(status_code=upstream.status_code, content=upstream.json())
-
-    unified = adapter.parse_response(upstream.json())
-    return JSONResponse(content=unified.model_dump(exclude_none=True))
-
-
-def _bad_gateway(detail: str) -> JSONResponse:
-    return JSONResponse(
-        status_code=502,
-        content={"error": {"message": f"upstream request failed: {detail}", "type": "bad_gateway"}},
+    outcome = await execute_with_fallback(
+        candidates,
+        payload,
+        client,
+        request.app.state.circuit_breaker,
+        RetryConfig(
+            attempts=settings.retry_attempts,
+            base_delay=settings.retry_base_delay,
+            max_delay=settings.retry_max_delay,
+        ),
     )
+
+    if isinstance(outcome, Success):
+        unified = outcome.candidate.adapter.parse_response(outcome.response.json())
+        return JSONResponse(content=unified.model_dump(exclude_none=True))
+
+    return _error_response(outcome)
+
+
+def _error_response(failure: Failure) -> JSONResponse:
+    body = failure.body or {
+        "error": {
+            "message": failure.message,
+            "type": _STATUS_ERROR_TYPES.get(failure.status_code, "upstream_error"),
+        }
+    }
+    return JSONResponse(status_code=failure.status_code, content=body)
 
 
 def _rate_limited(retry_after: float) -> JSONResponse:
