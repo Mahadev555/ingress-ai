@@ -196,7 +196,12 @@ export default function Playground() {
                 <Square size={15} /> Stop
               </Button>
             ) : (
-              <Button onClick={send} loading={busy} className="h-[42px]">
+              <Button
+                onClick={send}
+                loading={busy}
+                disabled={!virtualKey || !input.trim()}
+                className="h-[42px]"
+              >
                 <SendHorizonal size={15} /> Send
               </Button>
             )}
@@ -249,12 +254,20 @@ export default function Playground() {
             )}
           </Field>
 
-          <Field label="Virtual key" hint="Sent as the Bearer token. Stored locally.">
+          <Field
+            label="Virtual key *"
+            hint={
+              virtualKey
+                ? "Sent as the Bearer token. Stored locally."
+                : "Required — create one on the API Keys page (sk-ingress-…)."
+            }
+          >
             <Input
               type="password"
               placeholder="sk-ingress-…"
               value={virtualKey}
               onChange={(e) => setVirtualKey(e.target.value)}
+              className={virtualKey ? "" : "border-amber-300 focus:border-amber-400 focus:ring-amber-400/30"}
             />
           </Field>
 

@@ -1,3 +1,4 @@
+import json
 import logging
 import math
 import time
@@ -46,6 +47,54 @@ async def _guarded_stream(source):
         logger.exception("streaming failed")
         yield b'data: {"error": {"message": "stream interrupted", "type": "stream_error"}}\n\n'
         yield b"data: [DONE]\n\n"
+
+
+async def _metered_stream(source, usage_holder: dict):
+    """Relay the guarded stream, capturing the usage chunk as it passes."""
+    async for chunk in _guarded_stream(source):
+        _sniff_usage(chunk, usage_holder)
+        yield chunk
+
+
+def _sniff_usage(chunk: bytes, usage_holder: dict) -> None:
+    """Pull token counts out of an OpenAI-style usage chunk, if present."""
+    for line in chunk.decode("utf-8", "ignore").splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[len("data:") :].strip()
+        if not data or data == "[DONE]":
+            continue
+        try:
+            usage = json.loads(data).get("usage")
+        except ValueError:
+            continue
+        if usage:
+            usage_holder["prompt_tokens"] = usage.get("prompt_tokens", 0)
+            usage_holder["completion_tokens"] = usage.get("completion_tokens", 0)
+            usage_holder["total_tokens"] = usage.get(
+                "total_tokens",
+                usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0),
+            )
+
+
+async def _record_stream_usage(session_factory, key, provider, model, usage_holder, started):
+    """Record a streamed request's usage once the stream has drained."""
+    event = UsageEvent(
+        key_id=key.key_id,
+        tenant_id=key.tenant_id,
+        provider=provider,
+        model=model,
+        prompt_tokens=usage_holder["prompt_tokens"],
+        completion_tokens=usage_holder["completion_tokens"],
+        total_tokens=usage_holder["total_tokens"],
+        cost_usd=cost_usd(model, usage_holder["prompt_tokens"], usage_holder["completion_tokens"]),
+        latency_ms=int((time.perf_counter() - started) * 1000),
+        status=200,
+        cache_hit=False,
+    )
+    observe(event)
+    await record_usage(session_factory, event)
 
 
 @router.get("/models")
@@ -101,11 +150,20 @@ async def create_chat_completion(
         )
         stream_payload = payload.model_copy(update={"model": candidate.model})
         source = candidate.adapter.stream(stream_payload, candidate.creds, client)
-        # Latency is measured after the stream drains (background runs then).
-        _record(request, background, key, candidate.provider, candidate.model,
-                None, 200, cache_hit=False, started=started)
+        # Sniff the final usage chunk as the stream flows, then record real
+        # tokens/cost once it finishes (the background task runs after that).
+        usage_holder = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        background.add_task(
+            _record_stream_usage,
+            request.app.state.session_factory,
+            key,
+            candidate.provider,
+            candidate.model,
+            usage_holder,
+            started,
+        )
         return StreamingResponse(
-            _guarded_stream(source),
+            _metered_stream(source, usage_holder),
             media_type="text/event-stream",
             headers=_SSE_HEADERS,
         )

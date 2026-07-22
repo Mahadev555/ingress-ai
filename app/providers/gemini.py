@@ -62,6 +62,7 @@ class GeminiAdapter(ProviderAdapter):
         native = self._native(req, creds, streaming=True)
         chunk_id = _new_id()
         created = int(time.time())
+        usage = None
 
         async with client.stream(
             native.method, native.url, headers=native.headers, json=native.json
@@ -75,6 +76,13 @@ class GeminiAdapter(ProviderAdapter):
                     continue
 
                 gemini_chunk = json.loads(data)
+                meta = gemini_chunk.get("usageMetadata")
+                if meta:
+                    usage = {
+                        "prompt_tokens": meta.get("promptTokenCount", 0),
+                        "completion_tokens": meta.get("candidatesTokenCount", 0),
+                        "total_tokens": meta.get("totalTokenCount", 0),
+                    }
                 candidate = (gemini_chunk.get("candidates") or [{}])[0]
                 text = _join_parts(candidate.get("content", {}).get("parts", []))
                 openai_chunk = {
@@ -91,6 +99,17 @@ class GeminiAdapter(ProviderAdapter):
                     ],
                 }
                 yield f"data: {json.dumps(openai_chunk)}\n\n".encode()
+
+        if usage:
+            final = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": req.model,
+                "choices": [],
+                "usage": usage,
+            }
+            yield f"data: {json.dumps(final)}\n\n".encode()
 
         yield b"data: [DONE]\n\n"
 

@@ -31,6 +31,9 @@ class OpenAIAdapter(ProviderAdapter):
     ) -> AsyncIterator[bytes]:
         native = self.build_request(req, creds)
         native.json["stream"] = True
+        # Ask the provider to include a final usage chunk so the gateway can
+        # meter streamed requests (tokens/cost).
+        native.json["stream_options"] = {"include_usage": True}
         async with client.stream(
             native.method, native.url, headers=native.headers, json=native.json
         ) as upstream:

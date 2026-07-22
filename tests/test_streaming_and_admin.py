@@ -50,6 +50,25 @@ def test_mid_stream_failure_becomes_terminal_error_event(make_gateway):
     assert text.rstrip().endswith("data: [DONE]")
 
 
+def test_streaming_meters_usage(make_gateway):
+    # A real provider ends the stream with a usage chunk; the gateway records it.
+    async def body():
+        yield b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
+        yield b'data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":5,"total_tokens":12}}\n\n'
+        yield b"data: [DONE]\n\n"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body())
+
+    with make_gateway(handler) as client:
+        resp = client.post("/v1/chat/completions", json=STREAM_BODY)
+        assert resp.status_code == 200
+        summary = client.get("/admin/usage", headers={"X-Admin-Token": ADMIN_TOKEN}).json()
+
+    assert summary["total_requests"] == 1
+    assert summary["total_tokens"] == 12  # metered from the streamed usage chunk
+
+
 def test_revoked_key_is_rejected(make_gateway):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=COMPLETION)
