@@ -44,6 +44,7 @@ export function createApi({ baseUrl = "", adminToken = "" } = {}) {
     // Public
     health: () => request(`${baseUrl}/health`),
     metrics: () => fetch(`${baseUrl}/metrics`).then((r) => r.text()),
+    models: () => request(`${baseUrl}/v1/models`),
 
     // Admin — keys
     listKeys: () => request(`${baseUrl}/admin/keys`, { headers: admin() }),

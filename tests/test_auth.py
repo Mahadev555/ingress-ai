@@ -92,8 +92,10 @@ def test_created_key_is_hashed_not_stored_plaintext(make_gateway):
         assert "key_hash" not in k
 
 
-def test_admin_disabled_without_api_key():
-    # No ADMIN_API_KEY configured -> admin surface is closed.
+def test_admin_disabled_without_api_key(monkeypatch):
+    # No ADMIN_API_KEY configured -> admin surface is closed. Force it empty so
+    # the test doesn't depend on a developer's local .env.
+    monkeypatch.setenv("ADMIN_API_KEY", "")
     with TestClient(app) as client:
         resp = client.post("/admin/keys", json={"name": "x"})
     assert resp.status_code == 503

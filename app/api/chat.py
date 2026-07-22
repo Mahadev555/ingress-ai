@@ -48,6 +48,18 @@ async def _guarded_stream(source):
         yield b"data: [DONE]\n\n"
 
 
+@router.get("/models")
+async def list_models() -> dict:
+    """OpenAI-compatible model list, driven by the AVAILABLE_MODELS setting.
+    Public (no key) so clients can discover models before authenticating."""
+    settings = get_settings()
+    data = [
+        {"id": model, "object": "model", "owned_by": provider_for_model(model)}
+        for model in settings.model_list()
+    ]
+    return {"object": "list", "data": data}
+
+
 @router.post("/chat/completions")
 async def create_chat_completion(
     payload: ChatCompletionRequest,

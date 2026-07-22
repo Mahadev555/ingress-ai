@@ -1,11 +1,13 @@
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Eraser, SendHorizonal, Square, User } from "lucide-react";
 import { useSettings } from "../lib/settings.jsx";
 import { chatStream, createApi } from "../lib/api.js";
-import { MODEL_CATALOG } from "../lib/models.js";
+import { useAsync } from "../lib/useAsync.js";
+import { MODEL_CATALOG, groupModels } from "../lib/models.js";
 import { Badge, Button, Card, Field, Input, Select, Textarea, cx } from "../components/ui.jsx";
 
 const DEFAULT_SYSTEM = "You are a helpful assistant.";
+const CUSTOM = "__custom__";
 
 function Bubble({ role, content }) {
   const isUser = role === "user";
@@ -34,9 +36,29 @@ function Bubble({ role, content }) {
 }
 
 export default function Playground() {
-  const { apiBase, virtualKey, setVirtualKey } = useSettings();
+  const { apiBase, virtualKey, setVirtualKey, api } = useSettings();
+
+  // Model list is fetched from the gateway (GET /v1/models); falls back to a
+  // static catalog if the gateway is unreachable.
+  const modelsQuery = useAsync(() => api.models(), [api]);
+  const groups = useMemo(
+    () => groupModels(modelsQuery.data?.data) ?? MODEL_CATALOG,
+    [modelsQuery.data]
+  );
+  const flatModels = useMemo(() => groups.flatMap((g) => g.models), [groups]);
 
   const [model, setModel] = useState("gpt-4o-mini");
+  const [customModel, setCustomModel] = useState("");
+  const [customMode, setCustomMode] = useState(false);
+  const effectiveModel = customMode ? customModel.trim() : model;
+
+  // Keep the selected model valid as the fetched list arrives.
+  useEffect(() => {
+    if (!customMode && flatModels.length && !flatModels.includes(model)) {
+      setModel(flatModels[0]);
+    }
+  }, [flatModels, customMode, model]);
+
   const [system, setSystem] = useState(DEFAULT_SYSTEM);
   const [temperature, setTemperature] = useState(0.7);
   const [streaming, setStreaming] = useState(true);
@@ -55,6 +77,10 @@ export default function Playground() {
 
   const send = async () => {
     if (!input.trim() || busy) return;
+    if (!effectiveModel) {
+      setError(new Error("Enter a model name."));
+      return;
+    }
     if (!virtualKey) {
       setError(new Error("Set a virtual key first (the field on the right)."));
       return;
@@ -68,7 +94,7 @@ export default function Playground() {
     scrollDown();
 
     const payload = {
-      model,
+      model: effectiveModel,
       temperature: Number(temperature),
       messages: [
         ...(system.trim() ? [{ role: "system", content: system.trim() }] : []),
@@ -125,7 +151,7 @@ export default function Playground() {
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-slate-900">Chat</span>
-            <Badge tone="brand">{model}</Badge>
+            <Badge tone="brand">{effectiveModel || "no model"}</Badge>
             {streaming && <Badge tone="green">streaming</Badge>}
           </div>
           <Button variant="ghost" onClick={clear} disabled={!messages.length}>
@@ -181,9 +207,28 @@ export default function Playground() {
       {/* Config column */}
       <div className="space-y-4">
         <Card className="space-y-4 p-5">
-          <Field label="Model">
-            <Select value={model} onChange={(e) => setModel(e.target.value)}>
-              {MODEL_CATALOG.map((group) => (
+          <Field
+            label="Model"
+            hint={
+              modelsQuery.loading
+                ? "Loading models from the gateway…"
+                : modelsQuery.error
+                ? "Using fallback list (gateway unreachable)."
+                : "Live from GET /v1/models."
+            }
+          >
+            <Select
+              value={customMode ? CUSTOM : model}
+              onChange={(e) => {
+                if (e.target.value === CUSTOM) {
+                  setCustomMode(true);
+                } else {
+                  setCustomMode(false);
+                  setModel(e.target.value);
+                }
+              }}
+            >
+              {groups.map((group) => (
                 <optgroup key={group.provider} label={group.provider}>
                   {group.models.map((m) => (
                     <option key={m} value={m}>
@@ -192,7 +237,16 @@ export default function Playground() {
                   ))}
                 </optgroup>
               ))}
+              <option value={CUSTOM}>Custom model…</option>
             </Select>
+            {customMode && (
+              <Input
+                className="mt-2"
+                placeholder="e.g. gemini-3.1-flash-lite"
+                value={customModel}
+                onChange={(e) => setCustomModel(e.target.value)}
+              />
+            )}
           </Field>
 
           <Field label="Virtual key" hint="Sent as the Bearer token. Stored locally.">

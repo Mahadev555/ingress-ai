@@ -95,3 +95,19 @@ def test_upstream_error_becomes_502(make_gateway):
 def test_health():
     with TestClient(app) as client:
         assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_models_endpoint_lists_configured_models(monkeypatch):
+    monkeypatch.setenv("AVAILABLE_MODELS", "gpt-4o-mini,claude-3-5-sonnet,gemini-1.5-flash")
+    with TestClient(app) as client:
+        resp = client.get("/v1/models")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["object"] == "list"
+    owned = {m["id"]: m["owned_by"] for m in data["data"]}
+    assert owned == {
+        "gpt-4o-mini": "openai",
+        "claude-3-5-sonnet": "anthropic",
+        "gemini-1.5-flash": "gemini",
+    }
