@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     circuit_fail_threshold: int = 5
     circuit_reset_seconds: float = 30.0
 
+    # Exact-match response cache.
+    cache_enabled: bool = True
+    cache_ttl_seconds: int = 300
+    # "memory" (single instance / dev) or "redis" (multi-replica production).
+    cache_backend: str = "memory"
+
     # Upstream HTTP timeout, in seconds.
     request_timeout: float = 60.0
 

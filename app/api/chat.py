@@ -1,3 +1,4 @@
+import logging
 import math
 from typing import Any
 
@@ -7,12 +8,15 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.api.deps import require_key
 from app.core.auth import KeyContext
+from app.core.cache import cache_key
 from app.core.config import get_settings
 from app.core.ratelimit import bucket_name, bucket_params
 from app.resilience.fallback import Failure, Success, execute_with_fallback
 from app.resilience.retry import RetryConfig
 from app.router.selector import build_candidates
 from app.schemas.unified import ChatCompletionRequest
+
+logger = logging.getLogger("ingress.chat")
 
 router = APIRouter()
 
@@ -50,7 +54,7 @@ async def create_chat_completion(
     candidates = build_candidates(payload.model, payload.fallbacks or [], settings)
 
     # Streaming holds a live connection, so fail-over isn't possible mid-stream;
-    # use the first healthy candidate.
+    # use the first healthy candidate. Streaming responses are not cached.
     if payload.stream:
         breaker = request.app.state.circuit_breaker
         candidate = next(
@@ -61,6 +65,15 @@ async def create_chat_completion(
             candidate.adapter.stream(stream_payload, candidate.creds, client),
             media_type="text/event-stream",
         )
+
+    cache = request.app.state.cache
+    key_str = cache_key(payload, key.tenant_id) if settings.cache_enabled else None
+
+    if key_str is not None:
+        cached = await cache.get(key_str)
+        if cached is not None:
+            logger.info("cache hit model=%s tenant=%s", payload.model, key.tenant_id)
+            return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
 
     outcome = await execute_with_fallback(
         candidates,
@@ -75,8 +88,12 @@ async def create_chat_completion(
     )
 
     if isinstance(outcome, Success):
-        unified = outcome.candidate.adapter.parse_response(outcome.response.json())
-        return JSONResponse(content=unified.model_dump(exclude_none=True))
+        body = outcome.candidate.adapter.parse_response(outcome.response.json()).model_dump(
+            exclude_none=True
+        )
+        if key_str is not None:
+            await cache.set(key_str, body, settings.cache_ttl_seconds)
+        return JSONResponse(content=body, headers={"X-Cache": "MISS"})
 
     return _error_response(outcome)
 

@@ -91,7 +91,8 @@ uv run pytest
 - ✅ Virtual keys + auth: hashed keys, per-key allowed models, admin key management
 - ✅ Rate limiting: token bucket per key + model, `429` + `Retry-After` (memory or Redis)
 - ✅ Resilience: retry with backoff, fail-over to fallback models, per-provider circuit breaker
-- ⏳ Cache, observability
+- ✅ Exact-match cache: hash of the normalized request, per-tenant, `X-Cache: HIT/MISS` (memory or Redis)
+- ⏳ Observability, streaming/admin/deploy polish
 
 Add a `fallbacks` list to any request and the gateway retries transient failures,
 then fails over to the next model (possibly a different provider) if the primary

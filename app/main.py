@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api import admin, chat
+from app.core.cache import create_cache
 from app.core.config import get_settings
 from app.core.ratelimit import create_rate_limiter
 from app.db.session import create_engine, init_models
@@ -32,12 +33,14 @@ async def lifespan(app: FastAPI):
         fail_threshold=settings.circuit_fail_threshold,
         reset_timeout=settings.circuit_reset_seconds,
     )
+    app.state.cache = create_cache(settings)
 
     try:
         yield
     finally:
         await app.state.http_client.aclose()
         await app.state.rate_limiter.close()
+        await app.state.cache.close()
         await engine.dispose()
 
 
