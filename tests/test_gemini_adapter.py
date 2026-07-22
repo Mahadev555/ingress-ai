@@ -3,9 +3,7 @@
 import json
 
 import httpx
-from fastapi.testclient import TestClient
 
-from app.main import app
 from app.providers.base import ProviderCreds
 from app.providers.gemini import GeminiAdapter
 from app.schemas.unified import ChatCompletionRequest
@@ -27,10 +25,6 @@ GEMINI_PAYLOAD = {
     },
     "modelVersion": "gemini-1.5-flash",
 }
-
-
-def _mock_client(handler) -> httpx.AsyncClient:
-    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
 def test_build_request_translates_to_gemini_shape():
@@ -73,7 +67,7 @@ def test_parse_response_maps_to_unified():
     assert unified.usage.total_tokens == 7
 
 
-def test_endpoint_routes_gemini_by_model_name():
+def test_endpoint_routes_gemini_by_model_name(make_gateway):
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -81,8 +75,7 @@ def test_endpoint_routes_gemini_by_model_name():
         captured["body"] = json.loads(request.content)
         return httpx.Response(200, json=GEMINI_PAYLOAD)
 
-    with TestClient(app) as client:
-        app.state.http_client = _mock_client(handler)
+    with make_gateway(handler) as client:
         resp = client.post(
             "/v1/chat/completions",
             json={
@@ -100,7 +93,7 @@ def test_endpoint_routes_gemini_by_model_name():
     assert body["usage"]["total_tokens"] == 7
 
 
-def test_gemini_streaming_normalizes_to_openai_chunks():
+def test_gemini_streaming_normalizes_to_openai_chunks(make_gateway):
     async def sse_body():
         yield b'data: {"candidates":[{"content":{"parts":[{"text":"hel"}]}}]}\n\n'
         yield b'data: {"candidates":[{"content":{"parts":[{"text":"lo"}],"role":"model"},"finishReason":"STOP"}]}\n\n'
@@ -110,8 +103,7 @@ def test_gemini_streaming_normalizes_to_openai_chunks():
         assert "alt=sse" in str(request.url)
         return httpx.Response(200, content=sse_body())
 
-    with TestClient(app) as client:
-        app.state.http_client = _mock_client(handler)
+    with make_gateway(handler) as client:
         resp = client.post(
             "/v1/chat/completions",
             json={

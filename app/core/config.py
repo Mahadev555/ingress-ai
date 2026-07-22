@@ -23,9 +23,14 @@ class Settings(BaseSettings):
     azure_endpoint: str = ""
     azure_api_version: str = "2024-02-15-preview"
 
-    # Shared infrastructure (used from later build days).
+    # Shared infrastructure.
+    # SQLite by default for zero-config local dev; set DATABASE_URL to a
+    # Postgres DSN (postgresql+asyncpg://...) in production.
+    database_url: str = "sqlite+aiosqlite:///./ingress.db"
     redis_url: str = "redis://localhost:6379/0"
-    postgres_url: str = "postgresql+asyncpg://localhost/ingress_ai"
+
+    # Admin API for key management; requests must send this as X-Admin-Token.
+    admin_api_key: str = ""
 
     # Upstream HTTP timeout, in seconds.
     request_timeout: float = 60.0

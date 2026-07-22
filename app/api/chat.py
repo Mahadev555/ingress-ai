@@ -1,9 +1,11 @@
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from app.api.deps import require_key
+from app.core.auth import KeyContext
 from app.core.config import get_settings
 from app.providers.registry import resolve_model
 from app.schemas.unified import ChatCompletionRequest
@@ -12,7 +14,22 @@ router = APIRouter()
 
 
 @router.post("/chat/completions")
-async def create_chat_completion(payload: ChatCompletionRequest, request: Request) -> Any:
+async def create_chat_completion(
+    payload: ChatCompletionRequest,
+    request: Request,
+    key: KeyContext = Depends(require_key),
+) -> Any:
+    if not key.allows_model(payload.model):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "message": f"model {payload.model!r} is not allowed for this key",
+                    "type": "model_not_allowed",
+                }
+            },
+        )
+
     settings = get_settings()
     client: httpx.AsyncClient = request.app.state.http_client
     adapter, creds = resolve_model(payload.model, settings)

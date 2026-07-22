@@ -10,8 +10,9 @@ dependencies = [
     "httpx",
     "pydantic",
     "pydantic-settings",
-    "sqlalchemy",
+    "sqlalchemy[asyncio]",
     "asyncpg",
+    "aiosqlite",
     "redis",
     "prometheus-client",
 ]

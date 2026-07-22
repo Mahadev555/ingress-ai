@@ -51,6 +51,32 @@ curl http://localhost:8000/v1/chat/completions \
 Streaming works the same way — add `"stream": true` and the gateway relays the
 server-sent events straight through without buffering.
 
+## Virtual keys
+
+Clients authenticate with a **virtual key** (`sk-ingress-…`) instead of a real
+provider key — the provider keys stay server-side in config. Keys are stored
+hashed (only a prefix is retained for display) and can be scoped to a set of
+allowed models.
+
+Set `ADMIN_API_KEY` in `.env`, then mint a key:
+
+```bash
+curl http://localhost:8000/admin/keys \
+  -H "X-Admin-Token: $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-app", "allowed_models": ["gpt-4o-mini", "claude-3-5-sonnet"]}'
+# -> {"id": 1, "key": "sk-ingress-...", ...}   (the full key is shown only once)
+```
+
+Use it as the bearer token on chat requests:
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer sk-ingress-..." \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hello!"}]}'
+```
+
 ## Tests
 
 ```bash
@@ -62,7 +88,8 @@ uv run pytest
 - ✅ OpenAI-compatible `/v1/chat/completions` (streaming and non-streaming) + `/health`
 - ✅ Canonical unified schema and a three-method provider adapter contract
 - ✅ Four providers behind one API, routed by model name
-- ⏳ Virtual keys, rate limiting, resilience, cache, observability
+- ✅ Virtual keys + auth: hashed keys, per-key allowed models, admin key management
+- ⏳ Rate limiting, resilience, cache, observability
 
 Point any OpenAI SDK at the gateway and choose a provider purely by model name —
 same request shape for all of them:

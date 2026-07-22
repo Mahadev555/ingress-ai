@@ -1,8 +1,7 @@
-"""Day 1 deliverable: /v1/chat/completions proxies through to OpenAI.
+"""/v1/chat/completions proxies through to OpenAI (JSON and streaming).
 
 The upstream is faked with httpx.MockTransport so the test needs no real API
-key and makes no network calls. We assert the gateway forwards the request and
-relays the response for both the JSON and streaming paths.
+key and makes no network calls.
 """
 
 import json
@@ -28,11 +27,7 @@ COMPLETION = {
 }
 
 
-def _mock_client(handler) -> httpx.AsyncClient:
-    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
-
-
-def test_non_streaming_passthrough():
+def test_non_streaming_passthrough(make_gateway):
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -40,8 +35,7 @@ def test_non_streaming_passthrough():
         captured["body"] = json.loads(request.content)
         return httpx.Response(200, json=COMPLETION)
 
-    with TestClient(app) as client:
-        app.state.http_client = _mock_client(handler)
+    with make_gateway(handler) as client:
         resp = client.post(
             "/v1/chat/completions",
             json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
@@ -54,7 +48,7 @@ def test_non_streaming_passthrough():
     assert captured["body"]["model"] == "gpt-4o-mini"
 
 
-def test_streaming_passthrough():
+def test_streaming_passthrough(make_gateway):
     sse_body = (
         b'data: {"choices":[{"delta":{"content":"hel"}}]}\n\n'
         b'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n'
@@ -70,8 +64,7 @@ def test_streaming_passthrough():
         assert json.loads(request.content)["stream"] is True
         return httpx.Response(200, content=stream_body())
 
-    with TestClient(app) as client:
-        app.state.http_client = _mock_client(handler)
+    with make_gateway(handler) as client:
         resp = client.post(
             "/v1/chat/completions",
             json={
@@ -85,12 +78,11 @@ def test_streaming_passthrough():
     assert resp.content == sse_body
 
 
-def test_upstream_error_becomes_502():
+def test_upstream_error_becomes_502(make_gateway):
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("boom")
 
-    with TestClient(app) as client:
-        app.state.http_client = _mock_client(handler)
+    with make_gateway(handler) as client:
         resp = client.post(
             "/v1/chat/completions",
             json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},

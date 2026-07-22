@@ -1,11 +1,7 @@
 """Azure OpenAI: deployment routing + api-version, OpenAI body/response reused."""
 
-import json
-
 import httpx
-from fastapi.testclient import TestClient
 
-from app.main import app
 from app.providers.azure_openai import AzureOpenAIAdapter
 from app.providers.base import ProviderCreds
 from app.schemas.unified import ChatCompletionRequest
@@ -28,10 +24,6 @@ COMPLETION = {
 }
 
 
-def _mock_client(handler) -> httpx.AsyncClient:
-    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
-
-
 def test_build_request_uses_deployment_and_api_version():
     req = ChatCompletionRequest(
         model="azure/my-deployment",
@@ -49,7 +41,7 @@ def test_build_request_uses_deployment_and_api_version():
     assert native.json["model"] == "my-deployment"
 
 
-def test_endpoint_routes_azure_by_prefix(monkeypatch):
+def test_endpoint_routes_azure_by_prefix(make_gateway, monkeypatch):
     monkeypatch.setenv("AZURE_ENDPOINT", "https://my-resource.openai.azure.com")
     monkeypatch.setenv("AZURE_API_VERSION", "2024-02-15-preview")
 
@@ -59,8 +51,7 @@ def test_endpoint_routes_azure_by_prefix(monkeypatch):
         captured["url"] = str(request.url)
         return httpx.Response(200, json=COMPLETION)
 
-    with TestClient(app) as client:
-        app.state.http_client = _mock_client(handler)
+    with make_gateway(handler) as client:
         resp = client.post(
             "/v1/chat/completions",
             json={

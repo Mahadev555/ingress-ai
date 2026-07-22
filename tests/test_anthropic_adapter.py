@@ -3,9 +3,7 @@
 import json
 
 import httpx
-from fastapi.testclient import TestClient
 
-from app.main import app
 from app.providers.anthropic import AnthropicAdapter
 from app.providers.base import ProviderCreds
 from app.schemas.unified import ChatCompletionRequest
@@ -25,10 +23,6 @@ ANTHROPIC_PAYLOAD = {
     "stop_reason": "end_turn",
     "usage": {"input_tokens": 6, "output_tokens": 4},
 }
-
-
-def _mock_client(handler) -> httpx.AsyncClient:
-    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
 def test_build_request_lifts_system_and_sets_max_tokens():
@@ -62,15 +56,14 @@ def test_parse_response_maps_to_unified():
     assert unified.usage.total_tokens == 10
 
 
-def test_endpoint_routes_claude_by_model_name():
+def test_endpoint_routes_claude_by_model_name(make_gateway):
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
         return httpx.Response(200, json=ANTHROPIC_PAYLOAD)
 
-    with TestClient(app) as client:
-        app.state.http_client = _mock_client(handler)
+    with make_gateway(handler) as client:
         resp = client.post(
             "/v1/chat/completions",
             json={
@@ -83,7 +76,7 @@ def test_endpoint_routes_claude_by_model_name():
     assert resp.json()["choices"][0]["message"]["content"] == "hi from claude"
 
 
-def test_anthropic_streaming_normalizes_to_openai_chunks():
+def test_anthropic_streaming_normalizes_to_openai_chunks(make_gateway):
     async def sse_body():
         yield b'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hel"}}\n\n'
         yield b'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"lo"}}\n\n'
@@ -93,8 +86,7 @@ def test_anthropic_streaming_normalizes_to_openai_chunks():
         assert json.loads(request.content)["stream"] is True
         return httpx.Response(200, content=sse_body())
 
-    with TestClient(app) as client:
-        app.state.http_client = _mock_client(handler)
+    with make_gateway(handler) as client:
         resp = client.post(
             "/v1/chat/completions",
             json={
