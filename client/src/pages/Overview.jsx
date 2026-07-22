@@ -45,20 +45,14 @@ function statusTone(status) {
   return "green";
 }
 
-function Stat({ icon: Icon, label, value, sub, tone = "brand" }) {
-  const tones = {
-    brand: "bg-brand-50 text-brand-600",
-    emerald: "bg-emerald-50 text-emerald-600",
-    amber: "bg-amber-50 text-amber-600",
-    slate: "bg-slate-100 text-slate-500",
-  };
+function Stat({ icon: Icon, label, value, sub }) {
   return (
     <Card className="p-5">
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
           {label}
         </span>
-        <span className={cx("flex h-9 w-9 items-center justify-center rounded-lg", tones[tone])}>
+        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
           <Icon size={18} />
         </span>
       </div>
@@ -127,15 +121,14 @@ export default function Overview() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat icon={Activity} label="Requests" value={fmt(u.total_requests)} sub="all time" />
-        <Stat icon={Cpu} label="Tokens" value={fmt(u.total_tokens)} sub="prompt + completion" tone="emerald" />
+        <Stat icon={Cpu} label="Tokens" value={fmt(u.total_tokens)} sub="prompt + completion" />
         <Stat
           icon={Coins}
           label="Est. cost"
           value={`$${(u.total_cost_usd ?? 0).toFixed(4)}`}
           sub="across all providers"
-          tone="amber"
         />
-        <Stat icon={KeyRound} label="Active keys" value={fmt(activeKeys)} sub={`${keys.data?.length ?? 0} total`} tone="slate" />
+        <Stat icon={KeyRound} label="Active keys" value={fmt(activeKeys)} sub={`${keys.data?.length ?? 0} total`} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

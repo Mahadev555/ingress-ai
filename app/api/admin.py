@@ -121,10 +121,16 @@ class UsageSummary(BaseModel):
 
 
 @router.get("/usage", response_model=UsageSummary)
-async def usage_summary(session: AsyncSession = Depends(get_session)) -> UsageSummary:
-    requests, prompt, completion, total, cost = (
-        await session.execute(select(*_usage_aggregates()))
-    ).one()
+async def usage_summary(
+    days: int = 0, session: AsyncSession = Depends(get_session)
+) -> UsageSummary:
+    """Totals across all keys/models. `days<=0` means all time."""
+    days = min(days, 365)
+    query = select(*_usage_aggregates())
+    if days > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        query = query.where(UsageRecord.created_at >= cutoff)
+    requests, prompt, completion, total, cost = (await session.execute(query)).one()
     return UsageSummary(
         total_requests=requests,
         prompt_tokens=int(prompt),
@@ -280,24 +286,25 @@ async def usage_timeseries(
     requests/success-rate chart, and an errors-by-status chart. `func.date()`
     buckets by day on both SQLite (dev) and Postgres (prod).
     """
-    days = max(1, min(days, 90))
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    days = min(days, 365)  # days <= 0 means "all time" (no lower bound)
     day = func.date(UsageRecord.created_at).label("day")
 
-    rows = (
-        await session.execute(
-            select(
-                day,
-                UsageRecord.model,
-                UsageRecord.provider,
-                UsageRecord.status,
-                *_usage_aggregates(),
-            )
-            .where(UsageRecord.created_at >= cutoff)
-            .group_by(day, UsageRecord.model, UsageRecord.provider, UsageRecord.status)
-            .order_by(day)
+    query = (
+        select(
+            day,
+            UsageRecord.model,
+            UsageRecord.provider,
+            UsageRecord.status,
+            *_usage_aggregates(),
         )
-    ).all()
+        .group_by(day, UsageRecord.model, UsageRecord.provider, UsageRecord.status)
+        .order_by(day)
+    )
+    if days > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        query = query.where(UsageRecord.created_at >= cutoff)
+
+    rows = (await session.execute(query)).all()
 
     return [
         TimeseriesPoint(

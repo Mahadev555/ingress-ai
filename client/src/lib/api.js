@@ -55,7 +55,8 @@ export function createApi({ baseUrl = "", adminToken = "" } = {}) {
       request(`${baseUrl}/admin/keys/${id}`, { method: "DELETE", headers: admin() }),
 
     // Admin — usage
-    usage: () => request(`${baseUrl}/admin/usage`, { headers: admin() }),
+    usage: (days = 0) =>
+      request(`${baseUrl}/admin/usage${days ? `?days=${days}` : ""}`, { headers: admin() }),
     usageByKey: () => request(`${baseUrl}/admin/usage/by-key`, { headers: admin() }),
     usageByModel: () => request(`${baseUrl}/admin/usage/by-model`, { headers: admin() }),
     usageRecent: (limit = 20) =>

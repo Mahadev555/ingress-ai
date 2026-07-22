@@ -2,16 +2,25 @@
 // A "row" is { day, model, provider, status, requests, prompt_tokens,
 // completion_tokens, total_tokens, cost_usd }.
 
-// Colors reused across the per-series charts.
+// A restrained, professional palette (deep + muted) for the per-model lines —
+// distinct enough to tell apart, quiet enough to look production-grade.
 export const SERIES_COLORS = [
-  "#6366f1", "#10a37f", "#d97757", "#4285f4",
-  "#f59e0b", "#ec4899", "#0ea5e9", "#8b5cf6",
+  "#4f46e5", // indigo
+  "#0d9488", // teal
+  "#64748b", // slate
+  "#7c3aed", // violet
+  "#0284c7", // blue
+  "#be185d", // rose
 ];
 
 export function statusColor(status) {
-  if (status === "429") return "#f59e0b"; // rate limited
-  if (status.startsWith("5")) return "#ef4444"; // server errors
-  return "#94a3b8"; // other 4xx
+  if (status === "429") return "#d97706"; // rate limited (amber)
+  if (status.startsWith("5")) return "#dc2626"; // server errors (red)
+  return "#94a3b8"; // other 4xx (slate)
+}
+
+function utcDay(y, m, d) {
+  return new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
 }
 
 // A continuous list of UTC day labels (YYYY-MM-DD) so charts have no gaps
@@ -20,10 +29,24 @@ export function dayRange(days) {
   const out = [];
   const now = new Date();
   for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i));
-    out.push(d.toISOString().slice(0, 10));
+    out.push(utcDay(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i));
   }
   return out;
+}
+
+// For "All time": a continuous range spanning the earliest → latest day present
+// in the data (capped so the axis never explodes).
+export function dayRangeFromData(rows) {
+  if (!rows.length) return [];
+  const sorted = rows.map((r) => r.day).sort();
+  const out = [];
+  let d = new Date(`${sorted[0]}T00:00:00Z`);
+  const end = new Date(`${sorted[sorted.length - 1]}T00:00:00Z`);
+  while (d <= end) {
+    out.push(d.toISOString().slice(0, 10));
+    d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1));
+  }
+  return out.slice(-365);
 }
 
 export function shortDay(day) {

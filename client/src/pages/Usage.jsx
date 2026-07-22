@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ArrowDownToLine,
@@ -20,7 +20,7 @@ import {
   cx,
   EmptyState,
   ErrorState,
-  Select,
+  MultiSelect,
   Spinner,
 } from "../components/ui.jsx";
 import { ConnectPrompt } from "../components/ConnectPrompt.jsx";
@@ -31,22 +31,16 @@ const UsageCharts = lazy(() => import("../components/UsageCharts.jsx"));
 
 const fmt = (n) => new Intl.NumberFormat().format(n ?? 0);
 
-function Stat({ icon: Icon, label, value, tone }) {
-  const tones = {
-    brand: "bg-brand-50 text-brand-600",
-    emerald: "bg-emerald-50 text-emerald-600",
-    sky: "bg-sky-50 text-sky-600",
-    amber: "bg-amber-50 text-amber-600",
-  };
+function Stat({ icon: Icon, label, value }) {
   return (
-    <Card className="p-5">
-      <div className="flex items-center gap-3">
-        <span className={cx("flex h-10 w-10 items-center justify-center rounded-lg", tones[tone])}>
-          <Icon size={18} />
+    <Card className="px-4 py-3">
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500">
+          <Icon size={15} />
         </span>
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-          <div className="text-xl font-bold text-slate-900">{value}</div>
+        <div className="min-w-0">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{label}</div>
+          <div className="text-lg font-bold leading-tight text-slate-900">{value}</div>
         </div>
       </div>
     </Card>
@@ -97,17 +91,69 @@ function TokenCells({ row }) {
   );
 }
 
-const RANGES = [7, 14, 30];
+function Segmented({ options, value, onChange }) {
+  return (
+    <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.label}
+          onClick={() => onChange(o.days)}
+          className={cx(
+            "rounded-md px-3 py-1 text-xs font-semibold transition-colors",
+            value === o.days ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Segmented toggle for the summary boxes (0 = all time).
+const SUMMARY_RANGES = [
+  { label: "30D", days: 30 },
+  { label: "60D", days: 60 },
+  { label: "All", days: 0 },
+];
+
+// Segmented toggle for the trend charts.
+const RANGES = [
+  { label: "7D", days: 7 },
+  { label: "30D", days: 30 },
+  { label: "90D", days: 90 },
+];
 
 export default function Usage() {
   const { api, hasAdmin } = useSettings();
-  const [days, setDays] = useState(14);
-  const usage = useAsync(() => api.usage(), [api], { enabled: hasAdmin });
+  const [summaryDays, setSummaryDays] = useState(30);
+  const [days, setDays] = useState(7);
+  const [selectedModels, setSelectedModels] = useState([]); // [] = all models
+  const usage = useAsync(() => api.usage(summaryDays), [api, summaryDays], { enabled: hasAdmin });
   const byKey = useAsync(() => api.usageByKey(), [api], { enabled: hasAdmin });
   const byModel = useAsync(() => api.usageByModel(), [api], { enabled: hasAdmin });
   const series = useAsync(() => api.usageTimeseries(days), [api, days], { enabled: hasAdmin });
   const [metrics, setMetrics] = useState(null);
   const [loadingMetrics, setLoadingMetrics] = useState(false);
+
+  // Models actually present in the current window, for the chart filter dropdown.
+  const usedModels = useMemo(() => {
+    const set = new Set((series.data ?? []).map((r) => r.model));
+    return [...set].sort();
+  }, [series.data]);
+
+  // Drop any selected models that no longer appear in the current window.
+  useEffect(() => {
+    setSelectedModels((prev) => {
+      const next = prev.filter((m) => usedModels.includes(m));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [usedModels]);
+
+  const chartRows =
+    selectedModels.length === 0
+      ? series.data ?? []
+      : (series.data ?? []).filter((r) => selectedModels.includes(r.model));
 
   if (!hasAdmin) return <ConnectPrompt what="usage" />;
 
@@ -126,17 +172,25 @@ export default function Usage() {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900">Summary</h2>
+          <p className="text-xs text-slate-500">Totals across all keys and models.</p>
+        </div>
+        <Segmented options={SUMMARY_RANGES} value={summaryDays} onChange={setSummaryDays} />
+      </div>
+
       {usage.loading ? (
         <Spinner />
       ) : usage.error ? (
         <ErrorState error={usage.error} onRetry={usage.reload} />
       ) : (
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-          <Stat icon={Activity} label="Requests" value={fmt(u.total_requests)} tone="brand" />
-          <Stat icon={ArrowDownToLine} label="Input" value={fmt(u.prompt_tokens)} tone="sky" />
-          <Stat icon={ArrowUpFromLine} label="Output" value={fmt(u.completion_tokens)} tone="emerald" />
-          <Stat icon={Cpu} label="Total tokens" value={fmt(u.total_tokens)} tone="brand" />
-          <Stat icon={Coins} label="Est. cost" value={`$${(u.total_cost_usd ?? 0).toFixed(4)}`} tone="amber" />
+          <Stat icon={Activity} label="Requests" value={fmt(u.total_requests)} />
+          <Stat icon={ArrowDownToLine} label="Input" value={fmt(u.prompt_tokens)} />
+          <Stat icon={ArrowUpFromLine} label="Output" value={fmt(u.completion_tokens)} />
+          <Stat icon={Cpu} label="Total tokens" value={fmt(u.total_tokens)} />
+          <Stat icon={Coins} label="Est. cost" value={`$${(u.total_cost_usd ?? 0).toFixed(4)}`} />
         </div>
       )}
 
@@ -146,13 +200,14 @@ export default function Usage() {
           <p className="text-xs text-slate-500">Daily trends, grouped by model and status.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Select value={days} onChange={(e) => setDays(Number(e.target.value))} className="w-auto">
-            {RANGES.map((d) => (
-              <option key={d} value={d}>
-                Last {d} days
-              </option>
-            ))}
-          </Select>
+          <MultiSelect
+            options={usedModels}
+            value={selectedModels}
+            onChange={setSelectedModels}
+            allLabel="All models"
+            className="w-44"
+          />
+          <Segmented options={RANGES} value={days} onChange={setDays} />
           <Button variant="ghost" onClick={series.reload}>
             <RefreshCw size={14} /> Refresh
           </Button>
@@ -165,7 +220,7 @@ export default function Usage() {
         <ErrorState error={series.error} onRetry={series.reload} />
       ) : (
         <Suspense fallback={<Spinner label="Loading charts…" />}>
-          <UsageCharts rows={series.data} days={days} />
+          <UsageCharts rows={chartRows} days={days} />
         </Suspense>
       )}
 

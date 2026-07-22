@@ -18,6 +18,7 @@ import {
   SERIES_COLORS,
   statusColor,
   dayRange,
+  dayRangeFromData,
   shortDay,
   pivotRequests,
   pivotErrors,
@@ -39,12 +40,18 @@ function ChartCard({ title, subtitle, children }) {
   return (
     <Card>
       <CardHeader title={title} subtitle={subtitle} />
-      <div className="p-4">
-        <ResponsiveContainer width="100%" height={220}>
-          {children}
-        </ResponsiveContainer>
-      </div>
+      <div className="h-[220px] p-4">{children}</div>
     </Card>
+  );
+}
+
+// Wraps a recharts element so it fills the fixed-height ChartCard body.
+// (ResponsiveContainer must wrap a chart element only — never plain markup.)
+function Chart({ children }) {
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      {children}
+    </ResponsiveContainer>
   );
 }
 
@@ -84,7 +91,7 @@ export default function UsageCharts({ rows, days = 14 }) {
     );
   }
 
-  const dayList = dayRange(days);
+  const dayList = days > 0 ? dayRange(days) : dayRangeFromData(rows);
   const requests = pivotRequests(rows, dayList);
   const errors = pivotErrors(rows, dayList);
   const inputTokens = pivotByModel(rows, dayList, "prompt_tokens");
@@ -99,6 +106,7 @@ export default function UsageCharts({ rows, days = 14 }) {
         {/* Total requests + success rate */}
         <div className="lg:col-span-2">
           <ChartCard title="Total API requests" subtitle="Requests per day and success rate">
+            <Chart>
             <ComposedChart data={requests} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
               {commonAxes}
               <YAxis yAxisId="left" tick={AXIS} tickLine={false} axisLine={false} width={40} />
@@ -119,9 +127,9 @@ export default function UsageCharts({ rows, days = 14 }) {
                 type="monotone"
                 dataKey="requests"
                 name="Requests"
-                stroke="#6366f1"
-                fill="#6366f1"
-                fillOpacity={0.12}
+                stroke="#4f46e5"
+                fill="#4f46e5"
+                fillOpacity={0.06}
                 strokeWidth={2}
               />
               <Line
@@ -129,12 +137,14 @@ export default function UsageCharts({ rows, days = 14 }) {
                 type="monotone"
                 dataKey="successRate"
                 name="Success rate"
-                stroke="#10a37f"
-                strokeWidth={2}
+                stroke="#0d9488"
+                strokeWidth={1.5}
+                strokeDasharray="4 3"
                 dot={false}
                 connectNulls
               />
             </ComposedChart>
+            </Chart>
           </ChartCard>
         </div>
 
@@ -142,9 +152,10 @@ export default function UsageCharts({ rows, days = 14 }) {
         <ChartCard title="Total API errors" subtitle="4xx / 5xx responses by status">
           {errors.keys.length === 0 ? (
             <div className="flex h-full items-center justify-center text-sm text-slate-400">
-              No errors in this window 🎉
+              No errors in this window.
             </div>
           ) : (
+            <Chart>
             <BarChart data={errors.data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
               {commonAxes}
               <YAxis tick={AXIS} tickLine={false} axisLine={false} width={32} allowDecimals={false} />
@@ -154,12 +165,14 @@ export default function UsageCharts({ rows, days = 14 }) {
                 <Bar key={k} dataKey={k} name={k} stackId="err" fill={statusColor(k)} radius={[2, 2, 0, 0]} />
               ))}
             </BarChart>
+            </Chart>
           )}
         </ChartCard>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <ChartCard title="Input tokens per model" subtitle="Prompt tokens per day">
+          <Chart>
           <LineChart data={inputTokens.data} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
             {commonAxes}
             <YAxis tick={AXIS} tickLine={false} axisLine={false} width={44} tickFormatter={fmt} />
@@ -167,9 +180,11 @@ export default function UsageCharts({ rows, days = 14 }) {
             <Legend wrapperStyle={legend} />
             <ModelLines keys={inputTokens.keys} />
           </LineChart>
+          </Chart>
         </ChartCard>
 
         <ChartCard title="Output tokens per model" subtitle="Completion tokens per day">
+          <Chart>
           <LineChart data={outputTokens.data} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
             {commonAxes}
             <YAxis tick={AXIS} tickLine={false} axisLine={false} width={44} tickFormatter={fmt} />
@@ -177,9 +192,11 @@ export default function UsageCharts({ rows, days = 14 }) {
             <Legend wrapperStyle={legend} />
             <ModelLines keys={outputTokens.keys} />
           </LineChart>
+          </Chart>
         </ChartCard>
 
         <ChartCard title="Requests per model" subtitle="Request count per day">
+          <Chart>
           <LineChart data={modelRequests.data} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
             {commonAxes}
             <YAxis tick={AXIS} tickLine={false} axisLine={false} width={32} allowDecimals={false} />
@@ -187,6 +204,7 @@ export default function UsageCharts({ rows, days = 14 }) {
             <Legend wrapperStyle={legend} />
             <ModelLines keys={modelRequests.keys} />
           </LineChart>
+          </Chart>
         </ChartCard>
       </div>
     </div>
