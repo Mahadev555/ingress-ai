@@ -1,9 +1,74 @@
-# ingress-ai
+# Ingress AI
 
-Ingress AI is a standalone AI gateway that exposes one OpenAI-compatible API and
-routes requests to multiple providers: OpenAI, Anthropic, Azure OpenAI, and Gemini.
+**One OpenAI-compatible API in front of every LLM provider.** Point your app at
+Ingress AI instead of calling OpenAI / Anthropic / Gemini / Azure directly, and
+get unified access, per-app keys, rate limits, automatic fail-over, caching, and a
+full usage/cost ledger — without changing your client code.
 
-It is built to stay small and readable while being production-shaped: shared
+## What it does
+
+Using several LLM providers usually means juggling four SDKs, four sets of API
+keys scattered across your services, no shared rate limiting or cost tracking, and
+no failover when a provider has a bad day. Ingress AI puts one gateway in front of
+all of them:
+
+- Your apps speak the **OpenAI API** they already use — only the base URL changes.
+- You pick a provider **by model name** (`gpt-*`, `claude-*`, `gemini-*`,
+  `azure/*`); the gateway translates to each provider's native format and back.
+- Real provider keys stay **server-side**; your apps carry scoped **virtual keys**.
+- Every request is rate-limited, optionally cached, retried / failed-over on error,
+  and written to a **tokens + cost ledger** you can break down per key.
+
+```mermaid
+flowchart LR
+    Client["Your app<br/>OpenAI SDK + virtual key"]
+
+    subgraph Gateway["Ingress AI Gateway"]
+        direction TB
+        Auth["Auth<br/>virtual key → policy"]
+        RL["Rate limit<br/>token bucket per key + model"]
+        Cache["Cache<br/>exact-match, per-tenant"]
+        Router["Router<br/>pick provider by model name"]
+        Resil["Retry / Fallback<br/>circuit breaker"]
+        Auth --> RL --> Cache --> Router --> Resil
+    end
+
+    Client -->|"POST /v1/chat/completions"| Auth
+
+    Resil --> OpenAI["OpenAI"]
+    Resil --> Anthropic["Anthropic"]
+    Resil --> Gemini["Google Gemini"]
+    Resil --> Azure["Azure OpenAI"]
+
+    RL -.-> Redis[("Redis<br/>limits + cache")]
+    Cache -.-> Redis
+    Auth -.-> Postgres[("Postgres<br/>keys + usage ledger")]
+    Resil -.->|"tokens · cost · latency"| Postgres
+
+    classDef store fill:#eef2ff,stroke:#6366f1,color:#3730a3;
+    classDef prov fill:#f8fafc,stroke:#cbd5e1,color:#334155;
+    class Redis,Postgres store;
+    class OpenAI,Anthropic,Gemini,Azure prov;
+```
+
+## Features
+
+- **Unified API** — OpenAI-compatible `/v1/chat/completions`, streaming and non-streaming.
+- **4 providers, one interface** — OpenAI, Anthropic, Azure OpenAI, Google Gemini, routed by model name.
+- **Virtual keys** — hashed, per-key allowed models, admin-managed; provider keys never leave the server.
+- **Rate limiting** — token bucket per key + model, `429` + `Retry-After` (in-memory or Redis).
+- **Resilience** — retry with backoff, fail-over to fallback models, per-provider circuit breaker.
+- **Caching** — exact-match response cache, per-tenant (`X-Cache: HIT/MISS`).
+- **Observability** — usage/cost ledger (queryable per key), Prometheus `/metrics`, secret-redacting logs.
+- **Dashboard** — a React console (`client/`) for keys, a chat playground, and usage/metrics.
+
+## Dashboard
+
+A web console lives in [`client/`](client/) (React + Vite + Tailwind): create and
+revoke keys, watch per-key token/cost usage, read live metrics, and test any model
+in a streaming chat playground. Setup in [client/README.md](client/README.md).
+
+It's built to stay small and readable while being production-shaped: shared
 connection pools, streaming without buffering, and state kept in Redis + Postgres
 so any replica can serve any request.
 
@@ -83,20 +148,11 @@ curl http://localhost:8000/v1/chat/completions \
 uv run pytest
 ```
 
-## Status
-
-- ✅ OpenAI-compatible `/v1/chat/completions` (streaming and non-streaming) + `/health`
-- ✅ Canonical unified schema and a three-method provider adapter contract
-- ✅ Four providers behind one API, routed by model name
-- ✅ Virtual keys + auth: hashed keys, per-key allowed models, admin key management
-- ✅ Rate limiting: token bucket per key + model, `429` + `Retry-After` (memory or Redis)
-- ✅ Resilience: retry with backoff, fail-over to fallback models, per-provider circuit breaker
-- ✅ Exact-match cache: hash of the normalized request, per-tenant, `X-Cache: HIT/MISS` (memory or Redis)
-- ✅ Observability: usage/cost ledger in the database, Prometheus `/metrics`, secret-redacting logs
-- ✅ Hardened SSE (uniform error handling + anti-buffering headers), admin key CRUD, Docker deploy
+## Usage & metrics
 
 Every request writes a usage record (tokens, estimated cost, latency, provider,
-status, cache hit) off the hot path. `GET /admin/usage` returns totals and
+status, cache hit) off the hot path. `GET /admin/usage` returns totals,
+`GET /admin/usage/by-key` breaks it down per key, and
 `GET /metrics` exposes Prometheus counters/histograms.
 
 Add a `fallbacks` list to any request and the gateway retries transient failures,

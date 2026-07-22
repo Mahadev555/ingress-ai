@@ -5,7 +5,13 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-from app.providers.base import NativeRequest, ProviderAdapter, ProviderCreds
+from app.providers.base import (
+    NativeRequest,
+    ProviderAdapter,
+    ProviderCreds,
+    UpstreamStreamError,
+    read_stream_error,
+)
 from app.schemas.unified import ChatCompletionRequest, ChatCompletionResponse, Message
 
 # Gemini uses SCREAMING_SNAKE finish reasons; map them to OpenAI's vocabulary.
@@ -62,10 +68,13 @@ class GeminiAdapter(ProviderAdapter):
         native = self._native(req, creds, streaming=True)
         chunk_id = _new_id()
         created = int(time.time())
+        usage = None
 
         async with client.stream(
             native.method, native.url, headers=native.headers, json=native.json
         ) as upstream:
+            if upstream.status_code != 200:
+                raise UpstreamStreamError(upstream.status_code, await read_stream_error(upstream))
             async for line in upstream.aiter_lines():
                 line = line.strip()
                 if not line.startswith("data:"):
@@ -75,6 +84,13 @@ class GeminiAdapter(ProviderAdapter):
                     continue
 
                 gemini_chunk = json.loads(data)
+                meta = gemini_chunk.get("usageMetadata")
+                if meta:
+                    usage = {
+                        "prompt_tokens": meta.get("promptTokenCount", 0),
+                        "completion_tokens": meta.get("candidatesTokenCount", 0),
+                        "total_tokens": meta.get("totalTokenCount", 0),
+                    }
                 candidate = (gemini_chunk.get("candidates") or [{}])[0]
                 text = _join_parts(candidate.get("content", {}).get("parts", []))
                 openai_chunk = {
@@ -91,6 +107,17 @@ class GeminiAdapter(ProviderAdapter):
                     ],
                 }
                 yield f"data: {json.dumps(openai_chunk)}\n\n".encode()
+
+        if usage:
+            final = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": req.model,
+                "choices": [],
+                "usage": usage,
+            }
+            yield f"data: {json.dumps(final)}\n\n".encode()
 
         yield b"data: [DONE]\n\n"
 

@@ -37,17 +37,51 @@ def test_streaming_sets_anti_buffering_headers(make_gateway):
     assert resp.content == sse
 
 
-def test_mid_stream_failure_becomes_terminal_error_event(make_gateway):
+def test_stream_start_connection_failure_returns_error(make_gateway):
+    # A connection failure when opening the stream surfaces a real HTTP error,
+    # not a fake 200 empty stream.
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("boom")
 
     with make_gateway(handler) as client:
         resp = client.post("/v1/chat/completions", json=STREAM_BODY)
 
-    text = resp.text
-    # The stream did not hang or 500 — it closed with a clean error + DONE.
-    assert '"type": "stream_error"' in text
-    assert text.rstrip().endswith("data: [DONE]")
+    assert resp.status_code == 502
+    assert resp.json()["error"]["type"] == "bad_gateway"
+
+
+def test_stream_upstream_error_status_is_surfaced(make_gateway):
+    # Provider returns 429 (e.g. rate limited) when opening the stream — the
+    # client must see 429 with a normalized upstream error type, not a 200.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": {"message": "rate limited"}})
+
+    with make_gateway(handler) as client:
+        resp = client.post("/v1/chat/completions", json=STREAM_BODY)
+
+    assert resp.status_code == 429
+    body = resp.json()
+    assert body["error"]["type"] == "upstream_rate_limit"  # provider, not gateway
+    assert body["error"]["provider"] == "openai"
+
+
+def test_streaming_meters_usage(make_gateway):
+    # A real provider ends the stream with a usage chunk; the gateway records it.
+    async def body():
+        yield b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
+        yield b'data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":5,"total_tokens":12}}\n\n'
+        yield b"data: [DONE]\n\n"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body())
+
+    with make_gateway(handler) as client:
+        resp = client.post("/v1/chat/completions", json=STREAM_BODY)
+        assert resp.status_code == 200
+        summary = client.get("/admin/usage", headers={"X-Admin-Token": ADMIN_TOKEN}).json()
+
+    assert summary["total_requests"] == 1
+    assert summary["total_tokens"] == 12  # metered from the streamed usage chunk
 
 
 def test_revoked_key_is_rejected(make_gateway):

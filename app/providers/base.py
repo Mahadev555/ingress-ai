@@ -1,10 +1,31 @@
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Optional
 
 import httpx
 
 from app.schemas.unified import ChatCompletionRequest, ChatCompletionResponse
+
+
+class UpstreamStreamError(Exception):
+    """The provider returned a non-200 status when opening a stream. Raised
+    before any bytes are relayed so the gateway can surface a real HTTP error
+    instead of a fake 200 empty stream."""
+
+    def __init__(self, status_code: int, body: Optional[dict]) -> None:
+        super().__init__(f"upstream returned {status_code}")
+        self.status_code = status_code
+        self.body = body
+
+
+async def read_stream_error(upstream: httpx.Response) -> Optional[dict]:
+    """Read and JSON-parse an errored streaming response body, if possible."""
+    try:
+        raw = await upstream.aread()
+        return json.loads(raw)
+    except Exception:
+        return None
 
 
 @dataclass

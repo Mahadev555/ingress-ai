@@ -15,6 +15,15 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
 
+    # Models advertised by GET /v1/models (comma-separated). Any model whose
+    # name matches a registry prefix still routes even if not listed here.
+    available_models: str = (
+        "gpt-4o-mini,gpt-4o,"
+        "claude-3-5-sonnet,claude-3-5-haiku,"
+        "gemini-1.5-flash,gemini-1.5-pro,"
+        "gemini-2.0-flash,gemini-2.0-flash-lite,gemini-3.1-flash-lite"
+    )
+
     anthropic_api_key: str = ""
     anthropic_base_url: str = "https://api.anthropic.com"
     anthropic_version: str = "2023-06-01"
@@ -53,6 +62,10 @@ class Settings(BaseSettings):
 
     # Upstream HTTP timeout, in seconds.
     request_timeout: float = 60.0
+
+    def model_list(self) -> list[str]:
+        """Parse the comma-separated `available_models` into a clean list."""
+        return [m.strip() for m in self.available_models.split(",") if m.strip()]
 
 
 @lru_cache

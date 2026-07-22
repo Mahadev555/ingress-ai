@@ -5,7 +5,13 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-from app.providers.base import NativeRequest, ProviderAdapter, ProviderCreds
+from app.providers.base import (
+    NativeRequest,
+    ProviderAdapter,
+    ProviderCreds,
+    UpstreamStreamError,
+    read_stream_error,
+)
 from app.schemas.unified import ChatCompletionRequest, ChatCompletionResponse, Message
 
 # Anthropic's max_tokens is required; fall back to this when a client omits it.
@@ -71,9 +77,14 @@ class AnthropicAdapter(ProviderAdapter):
             }
             return f"data: {json.dumps(chunk)}\n\n".encode()
 
+        input_tokens = 0
+        output_tokens = 0
+
         async with client.stream(
             native.method, native.url, headers=native.headers, json=native.json
         ) as upstream:
+            if upstream.status_code != 200:
+                raise UpstreamStreamError(upstream.status_code, await read_stream_error(upstream))
             async for line in upstream.aiter_lines():
                 line = line.strip()
                 if not line.startswith("data:"):
@@ -81,14 +92,34 @@ class AnthropicAdapter(ProviderAdapter):
                 event = json.loads(line[len("data:") :].strip())
                 event_type = event.get("type")
 
-                if event_type == "content_block_delta":
+                if event_type == "message_start":
+                    input_tokens = (
+                        event.get("message", {}).get("usage", {}).get("input_tokens", 0)
+                    )
+                elif event_type == "content_block_delta":
                     text = event.get("delta", {}).get("text", "")
                     if text:
                         yield envelope({"content": text}, None)
                 elif event_type == "message_delta":
+                    output_tokens = event.get("usage", {}).get("output_tokens", output_tokens)
                     finish = _stop_reason(event.get("delta", {}).get("stop_reason"))
                     if finish:
                         yield envelope({}, finish)
+
+        if input_tokens or output_tokens:
+            final = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": req.model,
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": input_tokens,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
+                },
+            }
+            yield f"data: {json.dumps(final)}\n\n".encode()
 
         yield b"data: [DONE]\n\n"
 

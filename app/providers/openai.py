@@ -2,7 +2,13 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-from app.providers.base import NativeRequest, ProviderAdapter, ProviderCreds
+from app.providers.base import (
+    NativeRequest,
+    ProviderAdapter,
+    ProviderCreds,
+    UpstreamStreamError,
+    read_stream_error,
+)
 from app.schemas.unified import GATEWAY_ONLY_FIELDS, ChatCompletionRequest, ChatCompletionResponse
 
 
@@ -31,8 +37,13 @@ class OpenAIAdapter(ProviderAdapter):
     ) -> AsyncIterator[bytes]:
         native = self.build_request(req, creds)
         native.json["stream"] = True
+        # Ask the provider to include a final usage chunk so the gateway can
+        # meter streamed requests (tokens/cost).
+        native.json["stream_options"] = {"include_usage": True}
         async with client.stream(
             native.method, native.url, headers=native.headers, json=native.json
         ) as upstream:
+            if upstream.status_code != 200:
+                raise UpstreamStreamError(upstream.status_code, await read_stream_error(upstream))
             async for chunk in upstream.aiter_raw():
                 yield chunk

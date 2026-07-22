@@ -1,3 +1,4 @@
+import json
 import logging
 import math
 import time
@@ -15,6 +16,7 @@ from app.core.ratelimit import bucket_name, bucket_params
 from app.observability.metrics import observe
 from app.observability.pricing import cost_usd
 from app.observability.usage import record_usage
+from app.providers.base import UpstreamStreamError
 from app.providers.registry import provider_for_model
 from app.resilience.fallback import Failure, Success, execute_with_fallback
 from app.resilience.retry import RetryConfig
@@ -36,16 +38,74 @@ _SSE_HEADERS = {
 }
 
 
-async def _guarded_stream(source):
-    """Relay an adapter's SSE stream, turning a mid-stream failure into a clean
-    terminal error event instead of a dropped/hung connection."""
+async def _metered_stream(first: bytes | None, stream, usage_holder: dict):
+    """Relay a stream whose first chunk was already pulled (to check status),
+    capturing usage as it flows. A failure *after* start becomes a clean
+    terminal error event rather than a dropped connection."""
     try:
-        async for chunk in source:
+        if first is not None:
+            _sniff_usage(first, usage_holder)
+            yield first
+        async for chunk in stream:
+            _sniff_usage(chunk, usage_holder)
             yield chunk
     except Exception:
-        logger.exception("streaming failed")
+        logger.exception("streaming failed after start")
         yield b'data: {"error": {"message": "stream interrupted", "type": "stream_error"}}\n\n'
         yield b"data: [DONE]\n\n"
+
+
+def _sniff_usage(chunk: bytes, usage_holder: dict) -> None:
+    """Pull token counts out of an OpenAI-style usage chunk, if present."""
+    for line in chunk.decode("utf-8", "ignore").splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[len("data:") :].strip()
+        if not data or data == "[DONE]":
+            continue
+        try:
+            usage = json.loads(data).get("usage")
+        except ValueError:
+            continue
+        if usage:
+            usage_holder["prompt_tokens"] = usage.get("prompt_tokens", 0)
+            usage_holder["completion_tokens"] = usage.get("completion_tokens", 0)
+            usage_holder["total_tokens"] = usage.get(
+                "total_tokens",
+                usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0),
+            )
+
+
+async def _record_stream_usage(session_factory, key, provider, model, usage_holder, started):
+    """Record a streamed request's usage once the stream has drained."""
+    event = UsageEvent(
+        key_id=key.key_id,
+        tenant_id=key.tenant_id,
+        provider=provider,
+        model=model,
+        prompt_tokens=usage_holder["prompt_tokens"],
+        completion_tokens=usage_holder["completion_tokens"],
+        total_tokens=usage_holder["total_tokens"],
+        cost_usd=cost_usd(model, usage_holder["prompt_tokens"], usage_holder["completion_tokens"]),
+        latency_ms=int((time.perf_counter() - started) * 1000),
+        status=200,
+        cache_hit=False,
+    )
+    observe(event)
+    await record_usage(session_factory, event)
+
+
+@router.get("/models")
+async def list_models() -> dict:
+    """OpenAI-compatible model list, driven by the AVAILABLE_MODELS setting.
+    Public (no key) so clients can discover models before authenticating."""
+    settings = get_settings()
+    data = [
+        {"id": model, "object": "model", "owned_by": provider_for_model(model)}
+        for model in settings.model_list()
+    ]
+    return {"object": "list", "data": data}
 
 
 @router.post("/chat/completions")
@@ -66,6 +126,20 @@ async def create_chat_completion(
             },
         )
 
+    if key.budget_exceeded():
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": {
+                    "message": (
+                        f"Token budget exceeded: used {key.tokens_used} of "
+                        f"{key.token_budget} tokens."
+                    ),
+                    "type": "budget_exceeded",
+                }
+            },
+        )
+
     settings = get_settings()
     started = time.perf_counter()
 
@@ -80,6 +154,13 @@ async def create_chat_completion(
     client: httpx.AsyncClient = request.app.state.http_client
     candidates = build_candidates(payload.model, payload.fallbacks or [], settings)
 
+    # Drop providers that have no API key configured — a clean error beats a
+    # cryptic "illegal header" from an empty Bearer token. Fallbacks still work.
+    configured = [c for c in candidates if c.creds.api_key]
+    if not configured:
+        return _not_configured(candidates[0].provider)
+    candidates = configured
+
     # Streaming holds a live connection, so fail-over isn't possible mid-stream;
     # use the first healthy candidate. Streaming responses are not cached.
     if payload.stream:
@@ -88,12 +169,40 @@ async def create_chat_completion(
             (c for c in candidates if not breaker.is_open(c.provider)), candidates[0]
         )
         stream_payload = payload.model_copy(update={"model": candidate.model})
-        source = candidate.adapter.stream(stream_payload, candidate.creds, client)
-        # Latency is measured after the stream drains (background runs then).
-        _record(request, background, key, candidate.provider, candidate.model,
-                None, 200, cache_hit=False, started=started)
+        stream = candidate.adapter.stream(stream_payload, candidate.creds, client).__aiter__()
+
+        # Pull the first chunk before responding: this opens the upstream
+        # connection and checks its status, so a failed start surfaces a real
+        # HTTP error instead of a fake 200 empty stream.
+        try:
+            first = await stream.__anext__()
+        except StopAsyncIteration:
+            first = None
+        except UpstreamStreamError as exc:
+            breaker.record_failure(candidate.provider)
+            return _error_response(
+                Failure(exc.status_code, "upstream error", exc.body, provider=candidate.provider)
+            )
+        except httpx.RequestError as exc:
+            breaker.record_failure(candidate.provider)
+            return _error_response(
+                Failure(502, f"upstream request failed: {exc}", provider=candidate.provider)
+            )
+
+        # Sniff the final usage chunk as the stream flows, then record real
+        # tokens/cost once it finishes (the background task runs after that).
+        usage_holder = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        background.add_task(
+            _record_stream_usage,
+            request.app.state.session_factory,
+            key,
+            candidate.provider,
+            candidate.model,
+            usage_holder,
+            started,
+        )
         return StreamingResponse(
-            _guarded_stream(source),
+            _metered_stream(first, stream, usage_holder),
             media_type="text/event-stream",
             headers=_SSE_HEADERS,
         )
@@ -169,20 +278,83 @@ def _record(
     background.add_task(record_usage, request.app.state.session_factory, event)
 
 
+_UPSTREAM_FALLBACK_MESSAGE = {
+    429: "The upstream provider is rate limiting requests. Try again shortly.",
+    500: "The upstream provider returned an error.",
+    502: "The upstream provider is unavailable.",
+    503: "The upstream provider is temporarily unavailable.",
+}
+_MAX_ERROR_MESSAGE = 200
+
+
 def _error_response(failure: Failure) -> JSONResponse:
-    body = failure.body or {
-        "error": {
-            "message": failure.message,
-            "type": _STATUS_ERROR_TYPES.get(failure.status_code, "upstream_error"),
+    """Normalize any failure into a clean, typed error envelope.
+
+    Upstream provider errors are condensed to a single short message (never the
+    provider's raw, verbose body) and tagged so clients can tell a provider
+    error apart from a gateway one.
+    """
+    if failure.body is not None:
+        content = _normalize_upstream_error(failure.status_code, failure.provider, failure.body)
+    else:
+        content = {
+            "error": {
+                "message": failure.message,
+                "type": _STATUS_ERROR_TYPES.get(failure.status_code, "upstream_error"),
+            }
         }
+    return JSONResponse(status_code=failure.status_code, content=content)
+
+
+def _normalize_upstream_error(status: int, provider: str | None, raw: dict) -> dict:
+    message = ""
+    if isinstance(raw, dict) and isinstance(raw.get("error"), dict):
+        message = (raw["error"].get("message") or "").strip()
+    if not message:
+        message = _UPSTREAM_FALLBACK_MESSAGE.get(status, "The upstream provider returned an error.")
+    if len(message) > _MAX_ERROR_MESSAGE:
+        message = message[: _MAX_ERROR_MESSAGE - 1].rstrip() + "…"
+
+    error = {
+        "message": message,
+        "type": "upstream_rate_limit" if status == 429 else "upstream_error",
+        "code": status,
     }
-    return JSONResponse(status_code=failure.status_code, content=body)
+    if provider:
+        error["provider"] = provider
+    return {"error": error}
+
+
+_PROVIDER_ENV = {
+    "openai": "OPENAI_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "azure": "AZURE_API_KEY",
+}
+
+
+def _not_configured(provider: str) -> JSONResponse:
+    env = _PROVIDER_ENV.get(provider, f"{provider.upper()}_API_KEY")
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": {
+                "message": f"Provider '{provider}' is not configured on this gateway (set {env}).",
+                "type": "provider_not_configured",
+            }
+        },
+    )
 
 
 def _rate_limited(retry_after: float) -> JSONResponse:
     retry_seconds = max(1, math.ceil(retry_after))
     return JSONResponse(
         status_code=429,
-        content={"error": {"message": "rate limit exceeded", "type": "rate_limit_exceeded"}},
+        content={
+            "error": {
+                "message": f"Gateway rate limit exceeded. Retry after {retry_seconds}s.",
+                "type": "rate_limit_exceeded",
+            }
+        },
         headers={"Retry-After": str(retry_seconds)},
     )

@@ -71,6 +71,44 @@ def test_usage_is_recorded(make_gateway):
     assert summary["total_cost_usd"] > 0
 
 
+def test_usage_summary_splits_input_output(make_gateway):
+    with make_gateway(_ok) as client:
+        client.post("/v1/chat/completions", json=CHAT_BODY)
+        summary = client.get("/admin/usage", headers={"X-Admin-Token": ADMIN_TOKEN}).json()
+
+    assert summary["prompt_tokens"] == 5  # input
+    assert summary["completion_tokens"] == 3  # output
+    assert summary["total_tokens"] == 8
+
+
+def test_usage_by_key_attributes_tokens(make_gateway):
+    with make_gateway(_ok) as client:
+        client.post("/v1/chat/completions", json=CHAT_BODY)
+        by_key = client.get("/admin/usage/by-key", headers={"X-Admin-Token": ADMIN_TOKEN}).json()
+
+    assert len(by_key) == 1
+    row = by_key[0]
+    assert row["name"] == "test"  # the key make_gateway created
+    assert row["requests"] == 1
+    assert row["prompt_tokens"] == 5
+    assert row["completion_tokens"] == 3
+    assert row["total_tokens"] == 8
+
+
+def test_usage_by_model_breakdown(make_gateway):
+    with make_gateway(_ok) as client:
+        client.post("/v1/chat/completions", json=CHAT_BODY)
+        by_model = client.get("/admin/usage/by-model", headers={"X-Admin-Token": ADMIN_TOKEN}).json()
+
+    assert len(by_model) == 1
+    row = by_model[0]
+    assert row["model"] == "gpt-4o-mini"
+    assert row["provider"] == "openai"
+    assert row["prompt_tokens"] == 5
+    assert row["completion_tokens"] == 3
+    assert row["total_tokens"] == 8
+
+
 def test_metrics_endpoint_exposes_counters(make_gateway):
     with make_gateway(_ok) as client:
         client.post("/v1/chat/completions", json=CHAT_BODY)
