@@ -57,9 +57,8 @@ server-sent events straight through without buffering.
 uv run pytest
 ```
 
-## Build status
+## Status
 
-Built day-by-day from `plan/AI-Gateway-Architecture-Build-Plan.md`.
-
-- **Day 1 — Skeleton + OpenAI passthrough** ✅ `/v1/chat/completions` proxies
-  through to OpenAI (streaming and non-streaming), with a `/health` endpoint.
+- ✅ OpenAI-compatible `/v1/chat/completions` (streaming and non-streaming) + `/health`
+- ✅ Canonical unified schema and a three-method provider adapter contract
+- ⏳ Additional providers, virtual keys, rate limiting, resilience, cache, observability

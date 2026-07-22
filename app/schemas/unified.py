@@ -1,31 +1,48 @@
-from typing import List, Optional
-from pydantic import BaseModel
+from typing import Any, Optional
+
+from pydantic import BaseModel, ConfigDict
+
 
 class Message(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     role: str
-    content: str
+    content: Optional[Any] = None
+
 
 class ChatCompletionRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     model: str
-    messages: List[Message]
-    temperature: Optional[float] = 1.0
-    max_tokens: Optional[int] = 1024
-    top_p: Optional[float] = 1.0
+    messages: list[Message]
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    top_p: Optional[float] = None
+    stream: bool = False
+
 
 class Choice(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     index: int
     message: Message
-    finish_reason: Optional[str]
+    finish_reason: Optional[str] = None
+
 
 class Usage(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
 
+
 class ChatCompletionResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     id: str
     object: str = "chat.completion"
     created: int
     model: str
-    choices: List[Choice]
-    usage: Usage
+    choices: list[Choice]
+    usage: Optional[Usage] = None
