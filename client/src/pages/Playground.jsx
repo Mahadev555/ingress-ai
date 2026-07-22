@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Eraser, SendHorizonal, Square, User } from "lucide-react";
+import { AlertCircle, Bot, Eraser, SendHorizonal, Square, User, X } from "lucide-react";
 import { useSettings } from "../lib/settings.jsx";
 import { chatStream, createApi } from "../lib/api.js";
 import { useAsync } from "../lib/useAsync.js";
@@ -172,8 +172,24 @@ export default function Playground() {
         </div>
 
         {error && (
-          <div className="mx-5 mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error.message}
+          <div className="mx-5 mb-2 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <AlertCircle size={14} className="shrink-0" />
+            {error.status && (
+              <span className="rounded bg-red-100 px-1.5 py-0.5 font-semibold tabular-nums">
+                {error.status}
+              </span>
+            )}
+            {/* Message comes straight from the backend's normalized error. */}
+            <span className="flex-1 truncate" title={error.message}>
+              {error.message}
+            </span>
+            <button
+              onClick={() => setError(null)}
+              className="shrink-0 text-red-400 hover:text-red-600"
+              aria-label="Dismiss"
+            >
+              <X size={14} />
+            </button>
           </div>
         )}
 

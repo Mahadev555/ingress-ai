@@ -3,13 +3,14 @@
 
 export class ApiError extends Error {
   constructor(status, data) {
+    const err = data?.detail?.error || data?.error || null;
     const message =
-      data?.detail?.error?.message ||
-      data?.error?.message ||
+      err?.message ||
       (typeof data?.detail === "string" ? data.detail : null) ||
       `Request failed (${status})`;
     super(message);
     this.status = status;
+    this.type = err?.type || null; // e.g. rate_limit_exceeded, budget_exceeded, upstream_rate_limit
     this.data = data;
   }
 }

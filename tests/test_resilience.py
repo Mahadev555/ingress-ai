@@ -135,6 +135,54 @@ def test_client_error_is_relayed_without_failover(make_gateway):
     assert seen["gemini"] == 0  # 4xx is not a failover trigger
 
 
+def test_upstream_error_is_normalized(make_gateway):
+    # A verbose provider 429 body must be condensed into a clean, typed envelope
+    # (never the raw provider fields), and tagged as an upstream — not gateway — error.
+    verbose = {
+        "error": {
+            "message": "Resource has been exhausted (check quota). " * 20,
+            "code": 429,
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [{"@type": "RetryInfo", "retryDelay": "30s"}],
+        }
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json=verbose)
+
+    with make_gateway(handler) as client:
+        resp = client.post(
+            "/v1/chat/completions",
+            json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
+        )
+
+    assert resp.status_code == 429
+    err = resp.json()["error"]
+    assert err["type"] == "upstream_rate_limit"
+    assert err["provider"] == "openai"
+    assert len(err["message"]) <= 200  # condensed
+    assert "details" not in err and "status" not in err  # no raw provider fields leaked
+
+
+def test_unconfigured_provider_returns_clean_error(make_gateway, monkeypatch):
+    # No key for OpenAI -> a clear 503 instead of a cryptic empty-Bearer failure.
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
+        raise AssertionError("upstream should not be called when unconfigured")
+
+    with make_gateway(handler) as client:
+        resp = client.post(
+            "/v1/chat/completions",
+            json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
+        )
+
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["error"]["type"] == "provider_not_configured"
+    assert "OPENAI_API_KEY" in body["error"]["message"]
+
+
 def test_all_providers_down_returns_error(make_gateway):
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("boom")

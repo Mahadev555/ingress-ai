@@ -37,17 +37,32 @@ def test_streaming_sets_anti_buffering_headers(make_gateway):
     assert resp.content == sse
 
 
-def test_mid_stream_failure_becomes_terminal_error_event(make_gateway):
+def test_stream_start_connection_failure_returns_error(make_gateway):
+    # A connection failure when opening the stream surfaces a real HTTP error,
+    # not a fake 200 empty stream.
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("boom")
 
     with make_gateway(handler) as client:
         resp = client.post("/v1/chat/completions", json=STREAM_BODY)
 
-    text = resp.text
-    # The stream did not hang or 500 — it closed with a clean error + DONE.
-    assert '"type": "stream_error"' in text
-    assert text.rstrip().endswith("data: [DONE]")
+    assert resp.status_code == 502
+    assert resp.json()["error"]["type"] == "bad_gateway"
+
+
+def test_stream_upstream_error_status_is_surfaced(make_gateway):
+    # Provider returns 429 (e.g. rate limited) when opening the stream — the
+    # client must see 429 with a normalized upstream error type, not a 200.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": {"message": "rate limited"}})
+
+    with make_gateway(handler) as client:
+        resp = client.post("/v1/chat/completions", json=STREAM_BODY)
+
+    assert resp.status_code == 429
+    body = resp.json()
+    assert body["error"]["type"] == "upstream_rate_limit"  # provider, not gateway
+    assert body["error"]["provider"] == "openai"
 
 
 def test_streaming_meters_usage(make_gateway):

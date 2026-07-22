@@ -5,7 +5,13 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-from app.providers.base import NativeRequest, ProviderAdapter, ProviderCreds
+from app.providers.base import (
+    NativeRequest,
+    ProviderAdapter,
+    ProviderCreds,
+    UpstreamStreamError,
+    read_stream_error,
+)
 from app.schemas.unified import ChatCompletionRequest, ChatCompletionResponse, Message
 
 # Anthropic's max_tokens is required; fall back to this when a client omits it.
@@ -77,6 +83,8 @@ class AnthropicAdapter(ProviderAdapter):
         async with client.stream(
             native.method, native.url, headers=native.headers, json=native.json
         ) as upstream:
+            if upstream.status_code != 200:
+                raise UpstreamStreamError(upstream.status_code, await read_stream_error(upstream))
             async for line in upstream.aiter_lines():
                 line = line.strip()
                 if not line.startswith("data:"):

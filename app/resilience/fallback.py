@@ -20,6 +20,7 @@ class Failure:
     status_code: int
     message: str
     body: Optional[dict] = None
+    provider: Optional[str] = None
 
 
 Outcome = Union[Success, Failure]
@@ -42,7 +43,10 @@ async def execute_with_fallback(
 
     for candidate in candidates:
         if breaker.is_open(candidate.provider):
-            failure = Failure(503, f"provider {candidate.provider} temporarily unavailable")
+            failure = Failure(
+                503, f"provider {candidate.provider} temporarily unavailable",
+                provider=candidate.provider,
+            )
             continue
 
         attempt_payload = payload.model_copy(update={"model": candidate.model})
@@ -53,10 +57,15 @@ async def execute_with_fallback(
                 retry_config,
             )
         except ClientError as error:
-            return Failure(error.status_code, "upstream rejected the request", error.body)
+            return Failure(
+                error.status_code, "upstream rejected the request",
+                error.body, provider=candidate.provider,
+            )
         except TransientError as error:
             breaker.record_failure(candidate.provider)
-            failure = Failure(error.status_code, error.message, error.body)
+            failure = Failure(
+                error.status_code, error.message, error.body, provider=candidate.provider
+            )
             continue
 
         breaker.record_success(candidate.provider)
