@@ -1,3 +1,4 @@
+import math
 from typing import Any
 
 import httpx
@@ -7,6 +8,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from app.api.deps import require_key
 from app.core.auth import KeyContext
 from app.core.config import get_settings
+from app.core.ratelimit import bucket_name, bucket_params
 from app.providers.registry import resolve_model
 from app.schemas.unified import ChatCompletionRequest
 
@@ -31,6 +33,15 @@ async def create_chat_completion(
         )
 
     settings = get_settings()
+
+    if settings.rate_limit_enabled:
+        rate, capacity = bucket_params(settings.rate_limit_per_minute)
+        result = await request.app.state.rate_limiter.acquire(
+            bucket_name(key.key_id, payload.model), rate, capacity
+        )
+        if not result.allowed:
+            return _rate_limited(result.retry_after)
+
     client: httpx.AsyncClient = request.app.state.http_client
     adapter, creds = resolve_model(payload.model, settings)
 
@@ -61,4 +72,13 @@ def _bad_gateway(detail: str) -> JSONResponse:
     return JSONResponse(
         status_code=502,
         content={"error": {"message": f"upstream request failed: {detail}", "type": "bad_gateway"}},
+    )
+
+
+def _rate_limited(retry_after: float) -> JSONResponse:
+    retry_seconds = max(1, math.ceil(retry_after))
+    return JSONResponse(
+        status_code=429,
+        content={"error": {"message": "rate limit exceeded", "type": "rate_limit_exceeded"}},
+        headers={"Retry-After": str(retry_seconds)},
     )

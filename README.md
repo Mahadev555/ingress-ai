@@ -89,7 +89,8 @@ uv run pytest
 - ✅ Canonical unified schema and a three-method provider adapter contract
 - ✅ Four providers behind one API, routed by model name
 - ✅ Virtual keys + auth: hashed keys, per-key allowed models, admin key management
-- ⏳ Rate limiting, resilience, cache, observability
+- ✅ Rate limiting: token bucket per key + model, `429` + `Retry-After` (memory or Redis)
+- ⏳ Resilience (retry/fallback), cache, observability
 
 Point any OpenAI SDK at the gateway and choose a provider purely by model name —
 same request shape for all of them:

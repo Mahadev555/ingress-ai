@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api import admin, chat
 from app.core.config import get_settings
+from app.core.ratelimit import create_rate_limiter
 from app.db.session import create_engine, init_models
 
 
@@ -25,10 +26,13 @@ async def lifespan(app: FastAPI):
     app.state.db_engine = engine
     app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
+    app.state.rate_limiter = create_rate_limiter(settings)
+
     try:
         yield
     finally:
         await app.state.http_client.aclose()
+        await app.state.rate_limiter.close()
         await engine.dispose()
 
 

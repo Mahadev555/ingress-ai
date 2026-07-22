@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     # Admin API for key management; requests must send this as X-Admin-Token.
     admin_api_key: str = ""
 
+    # Rate limiting (token bucket, per key + model).
+    rate_limit_enabled: bool = True
+    rate_limit_per_minute: int = 60
+    # "memory" (single instance / dev) or "redis" (multi-replica production).
+    rate_limit_backend: str = "memory"
+
     # Upstream HTTP timeout, in seconds.
     request_timeout: float = 60.0
 
