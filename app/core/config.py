@@ -40,6 +40,8 @@ class Settings(BaseSettings):
 
     # Admin API for key management; requests must send this as X-Admin-Token.
     admin_api_key: str = ""
+    # Additional full-admin tokens (comma-separated), beyond admin_api_key.
+    admin_tokens: str = ""
 
     # Rate limiting (token bucket, per key + model).
     rate_limit_enabled: bool = True
@@ -62,6 +64,19 @@ class Settings(BaseSettings):
 
     # Upstream HTTP timeout, in seconds.
     request_timeout: float = 60.0
+
+    # Observability / audit.
+    # Capture redacted prompt+response text to the audit_logs table (off by default).
+    audit_capture_content: bool = False
+
+    # Playground: max turns per chat window before forcing a new conversation.
+    max_conversation_turns: int = 5
+
+    # Guardrails.
+    max_request_bytes: int = 1_000_000  # reject bodies larger than this (413)
+    max_output_tokens_cap: int = 0  # clamp requested max_tokens to this (0 = no cap)
+    guardrails_enabled: bool = False  # simple prompt-injection screening
+    admin_read_tokens: str = ""  # comma-separated read-only admin tokens
 
     def model_list(self) -> list[str]:
         """Parse the comma-separated `available_models` into a clean list."""

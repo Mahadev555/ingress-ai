@@ -1,4 +1,4 @@
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Optional
 
 import httpx
 
@@ -10,6 +10,13 @@ from app.providers.base import (
     read_stream_error,
 )
 from app.schemas.unified import GATEWAY_ONLY_FIELDS, ChatCompletionRequest, ChatCompletionResponse
+
+
+def _safe_json(resp: httpx.Response) -> Optional[dict]:
+    try:
+        return resp.json()
+    except Exception:
+        return None
 
 
 class OpenAIAdapter(ProviderAdapter):
@@ -28,6 +35,25 @@ class OpenAIAdapter(ProviderAdapter):
 
     def parse_response(self, payload: dict[str, Any]) -> ChatCompletionResponse:
         return ChatCompletionResponse.model_validate(payload)
+
+    async def embed(
+        self,
+        model: str,
+        payload: dict[str, Any],
+        creds: ProviderCreds,
+        client: httpx.AsyncClient,
+    ) -> dict[str, Any]:
+        resp = await client.post(
+            f"{creds.base_url}/embeddings",
+            headers={
+                "Authorization": f"Bearer {creds.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={**payload, "model": model},
+        )
+        if resp.status_code != 200:
+            raise UpstreamStreamError(resp.status_code, _safe_json(resp))
+        return resp.json()
 
     async def stream(
         self,

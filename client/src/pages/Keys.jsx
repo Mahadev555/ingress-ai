@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Check, Copy, KeyRound, Plus, ShieldCheck, Trash2, TriangleAlert } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, Copy, KeyRound, Pencil, Plus, ShieldCheck, Trash2, TriangleAlert } from "lucide-react";
 import { useSettings } from "../lib/settings.jsx";
 import { useAsync } from "../lib/useAsync.js";
 import {
@@ -12,9 +12,60 @@ import {
   Field,
   Input,
   Modal,
+  Select,
   Spinner,
 } from "../components/ui.jsx";
 import { ConnectPrompt } from "../components/ConnectPrompt.jsx";
+
+const fmt = (n) => new Intl.NumberFormat().format(n ?? 0);
+const num = (v) => (v === "" || v == null ? null : Number(v));
+
+const EMPTY_FORM = {
+  name: "",
+  tenant_id: "default",
+  allowed_models: "",
+  token_budget: "",
+  cost_budget_usd: "",
+  budget_period: "total",
+  rate_limit_per_minute: "",
+  tpm_limit: "",
+  max_concurrency: "",
+  expires_at: "",
+};
+
+function formFromKey(k) {
+  return {
+    name: k.name || "",
+    tenant_id: k.tenant_id || "default",
+    allowed_models: (k.allowed_models || []).join(", "),
+    token_budget: k.token_budget ?? "",
+    cost_budget_usd: k.cost_budget_usd ?? "",
+    budget_period: k.budget_period || "total",
+    rate_limit_per_minute: k.rate_limit_per_minute ?? "",
+    tpm_limit: k.tpm_limit ?? "",
+    max_concurrency: k.max_concurrency ?? "",
+    // Trim an ISO string down to what <input type="datetime-local"> expects.
+    expires_at: k.expires_at ? String(k.expires_at).slice(0, 16) : "",
+  };
+}
+
+function bodyFromForm(form, { withTenant = false } = {}) {
+  const body = {
+    name: form.name || "unnamed",
+    allowed_models: form.allowed_models
+      ? form.allowed_models.split(",").map((s) => s.trim()).filter(Boolean)
+      : [],
+    token_budget: num(form.token_budget),
+    cost_budget_usd: num(form.cost_budget_usd),
+    budget_period: form.budget_period || "total",
+    rate_limit_per_minute: num(form.rate_limit_per_minute),
+    tpm_limit: num(form.tpm_limit),
+    max_concurrency: num(form.max_concurrency),
+    expires_at: form.expires_at ? form.expires_at : null,
+  };
+  if (withTenant) body.tenant_id = form.tenant_id || "default";
+  return body;
+}
 
 function CopyButton({ value }) {
   const [copied, setCopied] = useState(false);
@@ -33,22 +84,69 @@ function CopyButton({ value }) {
   );
 }
 
+// Shared policy inputs used by both the create and edit modals.
+function KeyFields({ form, setForm }) {
+  const set = (patch) => setForm({ ...form, ...patch });
+  return (
+    <>
+      <Field label="Allowed models" hint="Comma-separated. Leave empty to allow any model.">
+        <Input
+          placeholder="gpt-4o-mini, claude-3-5-sonnet"
+          value={form.allowed_models}
+          onChange={(e) => set({ allowed_models: e.target.value })}
+        />
+      </Field>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Rate limit (req/min)" hint="Empty = global default.">
+          <Input type="number" placeholder="60" value={form.rate_limit_per_minute}
+            onChange={(e) => set({ rate_limit_per_minute: e.target.value })} />
+        </Field>
+        <Field label="TPM limit (tokens/min)" hint="Empty = unlimited.">
+          <Input type="number" placeholder="100000" value={form.tpm_limit}
+            onChange={(e) => set({ tpm_limit: e.target.value })} />
+        </Field>
+        <Field label="Max concurrency" hint="Max in-flight requests.">
+          <Input type="number" placeholder="unlimited" value={form.max_concurrency}
+            onChange={(e) => set({ max_concurrency: e.target.value })} />
+        </Field>
+        <Field label="Expires at" hint="Optional.">
+          <Input type="datetime-local" value={form.expires_at}
+            onChange={(e) => set({ expires_at: e.target.value })} />
+        </Field>
+        <Field label="Token budget" hint="Blocks over this many tokens.">
+          <Input type="number" placeholder="1000000" value={form.token_budget}
+            onChange={(e) => set({ token_budget: e.target.value })} />
+        </Field>
+        <Field label="Cost budget (USD)" hint="Blocks over this spend.">
+          <Input type="number" step="0.01" placeholder="50" value={form.cost_budget_usd}
+            onChange={(e) => set({ cost_budget_usd: e.target.value })} />
+        </Field>
+      </div>
+
+      <Field label="Budget period" hint="When token/cost budgets reset.">
+        <Select value={form.budget_period} onChange={(e) => set({ budget_period: e.target.value })}>
+          <option value="total">Total (lifetime)</option>
+          <option value="daily">Daily</option>
+          <option value="monthly">Monthly</option>
+        </Select>
+      </Field>
+    </>
+  );
+}
+
 function CreateKeyModal({ open, onClose, onCreated }) {
   const { api } = useSettings();
-  const [form, setForm] = useState({ name: "", tenant_id: "default", allowed_models: "", token_budget: "" });
+  const [form, setForm] = useState(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [created, setCreated] = useState(null);
 
-  const reset = () => {
-    setForm({ name: "", tenant_id: "default", allowed_models: "", token_budget: "" });
+  const close = () => {
+    setForm(EMPTY_FORM);
     setError(null);
     setCreated(null);
     setSubmitting(false);
-  };
-
-  const close = () => {
-    reset();
     onClose();
   };
 
@@ -56,15 +154,7 @@ function CreateKeyModal({ open, onClose, onCreated }) {
     setSubmitting(true);
     setError(null);
     try {
-      const body = {
-        name: form.name || "unnamed",
-        tenant_id: form.tenant_id || "default",
-        allowed_models: form.allowed_models
-          ? form.allowed_models.split(",").map((s) => s.trim()).filter(Boolean)
-          : [],
-        token_budget: form.token_budget ? Number(form.token_budget) : null,
-      };
-      const key = await api.createKey(body);
+      const key = await api.createKey(bodyFromForm(form, { withTenant: true }));
       setCreated(key);
       onCreated?.();
     } catch (e) {
@@ -84,12 +174,8 @@ function CreateKeyModal({ open, onClose, onCreated }) {
           <Button onClick={close}>Done</Button>
         ) : (
           <>
-            <Button variant="secondary" onClick={close}>
-              Cancel
-            </Button>
-            <Button onClick={submit} loading={submitting}>
-              Create key
-            </Button>
+            <Button variant="secondary" onClick={close}>Cancel</Button>
+            <Button onClick={submit} loading={submitting}>Create key</Button>
           </>
         )
       }
@@ -108,16 +194,6 @@ function CreateKeyModal({ open, onClose, onCreated }) {
             </code>
             <CopyButton value={created.key} />
           </div>
-          <dl className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <dt className="text-xs text-slate-400">Name</dt>
-              <dd className="font-medium text-slate-700">{created.name}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-slate-400">Tenant</dt>
-              <dd className="font-medium text-slate-700">{created.tenant_id}</dd>
-            </div>
-          </dl>
         </div>
       ) : (
         <div className="space-y-4">
@@ -126,37 +202,94 @@ function CreateKeyModal({ open, onClose, onCreated }) {
               {error.message}
             </div>
           )}
-          <Field label="Name">
-            <Input
-              placeholder="e.g. production-app"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
-          </Field>
-          <Field label="Tenant ID" hint="Scopes usage and cache to a tenant.">
-            <Input
-              value={form.tenant_id}
-              onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
-            />
-          </Field>
-          <Field label="Allowed models" hint="Comma-separated. Leave empty to allow any model.">
-            <Input
-              placeholder="gpt-4o-mini, claude-3-5-sonnet"
-              value={form.allowed_models}
-              onChange={(e) => setForm({ ...form, allowed_models: e.target.value })}
-            />
-          </Field>
-          <Field label="Token budget" hint="Optional. Reserved for quota enforcement.">
-            <Input
-              type="number"
-              placeholder="e.g. 1000000"
-              value={form.token_budget}
-              onChange={(e) => setForm({ ...form, token_budget: e.target.value })}
-            />
-          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Name">
+              <Input placeholder="production-app" value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            </Field>
+            <Field label="Tenant ID" hint="Scopes usage and cache.">
+              <Input value={form.tenant_id}
+                onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
+            </Field>
+          </div>
+          <KeyFields form={form} setForm={setForm} />
         </div>
       )}
     </Modal>
+  );
+}
+
+function EditKeyModal({ open, keyData, onClose, onSaved }) {
+  const { api } = useSettings();
+  const [form, setForm] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (keyData) {
+      setForm(formFromKey(keyData));
+      setError(null);
+    }
+  }, [keyData]);
+
+  if (!open || !form) return null;
+
+  const submit = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.updateKey(keyData.id, bodyFromForm(form));
+      onSaved?.();
+      onClose();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={`Edit key ${keyData?.key_prefix}…`}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button onClick={submit} loading={submitting}>Save changes</Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error.message}
+          </div>
+        )}
+        <Field label="Name">
+          <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        </Field>
+        <KeyFields form={form} setForm={setForm} />
+      </div>
+    </Modal>
+  );
+}
+
+function LimitsCell({ k }) {
+  const bits = [];
+  bits.push(k.rate_limit_per_minute ? `${k.rate_limit_per_minute}/min` : "default rate");
+  if (k.tpm_limit) bits.push(`${fmt(k.tpm_limit)} tpm`);
+  if (k.max_concurrency) bits.push(`${k.max_concurrency} conc`);
+  const budgets = [];
+  if (k.token_budget) budgets.push(`${fmt(k.token_budget)} tok`);
+  if (k.cost_budget_usd) budgets.push(`$${k.cost_budget_usd}`);
+  return (
+    <div className="flex flex-col gap-0.5 text-xs text-slate-500">
+      <span>{bits.join(" · ")}</span>
+      <span>
+        {budgets.length ? `${budgets.join(" + ")} / ${k.budget_period}` : "no budget"}
+      </span>
+    </div>
   );
 }
 
@@ -164,6 +297,7 @@ export default function Keys() {
   const { api, hasAdmin } = useSettings();
   const list = useAsync(() => api.listKeys(), [api], { enabled: hasAdmin });
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [revoking, setRevoking] = useState(null);
 
   if (!hasAdmin) return <ConnectPrompt what="key management" />;
@@ -208,8 +342,8 @@ export default function Keys() {
               <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-400">
                 <th className="px-5 py-3 font-semibold">Key</th>
                 <th className="px-5 py-3 font-semibold">Name</th>
-                <th className="px-5 py-3 font-semibold">Tenant</th>
                 <th className="px-5 py-3 font-semibold">Models</th>
+                <th className="px-5 py-3 font-semibold">Limits &amp; budget</th>
                 <th className="px-5 py-3 font-semibold">Status</th>
                 <th className="px-5 py-3" />
               </tr>
@@ -223,20 +357,18 @@ export default function Keys() {
                     </code>
                   </td>
                   <td className="px-5 py-3 font-medium text-slate-800">{k.name || "—"}</td>
-                  <td className="px-5 py-3 text-slate-600">{k.tenant_id}</td>
                   <td className="px-5 py-3 text-slate-600">
                     {k.allowed_models?.length ? (
                       <span className="flex flex-wrap gap-1">
                         {k.allowed_models.map((m) => (
-                          <Badge key={m} tone="brand">
-                            {m}
-                          </Badge>
+                          <Badge key={m} tone="brand">{m}</Badge>
                         ))}
                       </span>
                     ) : (
                       <Badge tone="slate">any</Badge>
                     )}
                   </td>
+                  <td className="px-5 py-3"><LimitsCell k={k} /></td>
                   <td className="px-5 py-3">
                     {k.active ? (
                       <Badge tone="green">
@@ -246,16 +378,19 @@ export default function Keys() {
                       <Badge tone="red">revoked</Badge>
                     )}
                   </td>
-                  <td className="px-5 py-3 text-right">
-                    {k.active && (
-                      <Button
-                        variant="danger"
-                        loading={revoking === k.id}
-                        onClick={() => revoke(k.id)}
-                      >
-                        <Trash2 size={14} /> Revoke
-                      </Button>
-                    )}
+                  <td className="px-5 py-3">
+                    <div className="flex items-center justify-end gap-2">
+                      {k.active && (
+                        <>
+                          <Button variant="secondary" onClick={() => setEditing(k)}>
+                            <Pencil size={14} /> Edit
+                          </Button>
+                          <Button variant="danger" loading={revoking === k.id} onClick={() => revoke(k.id)}>
+                            <Trash2 size={14} /> Revoke
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -265,6 +400,12 @@ export default function Keys() {
       )}
 
       <CreateKeyModal open={creating} onClose={() => setCreating(false)} onCreated={list.reload} />
+      <EditKeyModal
+        open={!!editing}
+        keyData={editing}
+        onClose={() => setEditing(null)}
+        onSaved={list.reload}
+      />
     </Card>
   );
 }

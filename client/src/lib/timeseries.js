@@ -71,7 +71,9 @@ export function pivotRequests(rows, dayList) {
     return {
       day: d,
       requests: b.requests,
-      successRate: b.requests ? Math.round((b.success / b.requests) * 100) : null,
+      // Grounded at 0 on no-traffic days so the line rises from the baseline
+      // instead of floating as a disconnected segment.
+      successRate: b.requests ? Math.round((b.success / b.requests) * 100) : 0,
     };
   });
 }

@@ -1,8 +1,10 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   BarChart3,
+  Boxes,
   KeyRound,
   LayoutDashboard,
+  ScrollText,
   Settings as SettingsIcon,
   TerminalSquare,
 } from "lucide-react";
@@ -14,16 +16,20 @@ import { useSettings } from "../lib/settings.jsx";
 const NAV = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/keys", label: "API Keys", icon: KeyRound },
+  { to: "/models", label: "Models", icon: Boxes },
   { to: "/playground", label: "Playground", icon: TerminalSquare },
   { to: "/usage", label: "Usage", icon: BarChart3 },
+  { to: "/audit", label: "Audit", icon: ScrollText },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
 const TITLES = {
   "/": "Overview",
   "/keys": "API Keys",
+  "/models": "Model Registry",
   "/playground": "Playground",
   "/usage": "Usage & Metrics",
+  "/audit": "Audit Logs",
   "/settings": "Settings",
 };
 

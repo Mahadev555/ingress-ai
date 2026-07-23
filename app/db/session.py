@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import StaticPool
 
+from app.db.migrate import run_migrations
 from app.db.models import Base
 
 
@@ -27,6 +28,8 @@ def create_engine(database_url: str) -> AsyncEngine:
 async def init_models(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # Add any columns missing from pre-existing tables (data-preserving).
+    await run_migrations(engine)
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:

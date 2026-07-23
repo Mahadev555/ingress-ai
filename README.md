@@ -53,14 +53,17 @@ flowchart LR
 
 ## Features
 
-- **Unified API** — OpenAI-compatible `/v1/chat/completions`, streaming and non-streaming.
+- **Unified API** — OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings`, streaming and non-streaming.
 - **4 providers, one interface** — OpenAI, Anthropic, Azure OpenAI, Google Gemini, routed by model name.
 - **Virtual keys** — hashed, per-key allowed models, admin-managed; provider keys never leave the server.
-- **Rate limiting** — token bucket per key + model, `429` + `Retry-After` (in-memory or Redis).
+- **Per-key governance** — request/min and token/min limits, concurrency caps, token & cost budgets (daily/monthly), and key expiry.
+- **Model registry** — DB-backed pricing, aliases, enable/disable, and default limits (overrides the env model list).
 - **Resilience** — retry with backoff, fail-over to fallback models, per-provider circuit breaker.
 - **Caching** — exact-match response cache, per-tenant (`X-Cache: HIT/MISS`).
-- **Observability** — usage/cost ledger (queryable per key), Prometheus `/metrics`, secret-redacting logs.
-- **Dashboard** — a React console (`client/`) for keys, a chat playground, and usage/metrics.
+- **Observability** — usage/cost ledger (queryable per key), Prometheus `/metrics`, trace IDs, optional redacted audit capture.
+- **Audit & conversation grouping** — opt-in capture of prompt/response pairs, grouped into conversations via an optional `X-Conversation-ID` header, with the virtual key used shown per conversation.
+- **Guardrails** — request-size limits, `max_tokens` caps, and opt-in prompt-injection screening.
+- **Dashboard** — a React console (`client/`) for keys, a model registry, a chat playground, usage/metrics, and audit logs.
 
 ## Screenshots
 
@@ -106,8 +109,9 @@ flowchart LR
 ## Dashboard
 
 A web console lives in [`client/`](client/) (React + Vite + Tailwind): create and
-revoke keys, watch per-key token/cost usage, read live metrics, and test any model
-in a streaming chat playground. Setup in [client/README.md](client/README.md).
+revoke keys, manage the model registry, watch per-key token/cost usage, read live
+metrics, browse grouped audit logs, and test any model in a streaming chat
+playground. Setup in [client/README.md](client/README.md).
 
 It's built to stay small and readable while being production-shaped: shared
 connection pools, streaming without buffering, and state kept in Redis + Postgres
@@ -226,8 +230,32 @@ All require the `X-Admin-Token` header (set `ADMIN_API_KEY`).
 |---|---|---|
 | `POST` | `/admin/keys` | Create a virtual key (full key returned once) |
 | `GET` | `/admin/keys` | List keys (prefix + metadata only) |
+| `PATCH` | `/admin/keys/{id}` | Edit a key (name, models, limits, budgets, expiry) |
 | `DELETE` | `/admin/keys/{id}` | Revoke a key (deactivates, keeps usage history) |
-| `GET` | `/admin/usage` | Usage totals (requests, tokens, cost) |
+| `GET` | `/admin/usage` | Usage totals (requests, tokens, cost); `?days=N` to window |
+| `GET/POST/PATCH/DELETE` | `/admin/models` | Model registry (pricing, aliases, enable/disable, default limits) |
+| `GET` | `/admin/audit` | Captured prompt/response turns, grouped into conversations (when audit is enabled) |
+
+Reads accept any admin token (including `ADMIN_READ_TOKENS`); create/edit/delete
+require a full-admin token (`ADMIN_API_KEY` or `ADMIN_TOKENS`).
+
+Per-key controls (set on create or `PATCH`): `rate_limit_per_minute`, `tpm_limit`
+(tokens/min), `max_concurrency`, `token_budget` / `cost_budget_usd` with a
+`budget_period` of `total`/`daily`/`monthly`, and `expires_at`.
+
+## Audit & conversation grouping
+
+Set `AUDIT_CAPTURE_CONTENT=true` to record each request's prompt and response
+(redacted, off the hot path) into an audit log. Turns are grouped into a single
+conversation when the client sends an optional **`X-Conversation-ID`** header —
+otherwise each request stands alone. `/admin/audit` returns one entry per
+conversation with its turn count and the virtual key used; the dashboard's Audit
+page shows each turn as a request/response pair.
+
+The gateway is stateless and never caps conversation length. The playground reads
+`MAX_CONVERSATION_TURNS` (default 5) from the public `GET /v1/config` endpoint and
+enforces the limit client-side — prompting the user to start a new chat (with a
+fresh conversation id) once it's reached.
 
 ## Deploy
 

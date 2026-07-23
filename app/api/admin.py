@@ -1,17 +1,19 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_admin
+from app.api.deps import require_admin, require_admin_read
 from app.core.auth import generate_key
-from app.db.models import UsageRecord, VirtualKey
+from app.db.models import AuditLog, ModelConfig, UsageRecord, VirtualKey
 from app.db.session import get_session
 
-router = APIRouter(dependencies=[Depends(require_admin)])
+# Reads require any admin token (incl. read-only); writes add require_admin.
+router = APIRouter(dependencies=[Depends(require_admin_read)])
+_WRITE = [Depends(require_admin)]
 
 
 class CreateKeyRequest(BaseModel):
@@ -19,16 +21,27 @@ class CreateKeyRequest(BaseModel):
     tenant_id: str = "default"
     allowed_models: list[str] = Field(default_factory=list)
     token_budget: Optional[int] = None
+    cost_budget_usd: Optional[float] = None
+    budget_period: str = "total"  # "total" | "daily" | "monthly"
+    rate_limit_per_minute: Optional[int] = None
+    tpm_limit: Optional[int] = None
+    max_concurrency: Optional[int] = None
+    expires_at: Optional[datetime] = None
 
 
-class CreateKeyResponse(BaseModel):
-    id: int
-    key: str  # full virtual key, shown only once
-    key_prefix: str
-    name: str
-    tenant_id: str
-    allowed_models: list[str]
-    token_budget: Optional[int]
+class UpdateKeyRequest(BaseModel):
+    """All fields optional; only those present are changed. Send an explicit
+    null to clear a nullable field (e.g. token_budget)."""
+
+    name: Optional[str] = None
+    allowed_models: Optional[list[str]] = None
+    token_budget: Optional[int] = None
+    cost_budget_usd: Optional[float] = None
+    budget_period: Optional[str] = None
+    rate_limit_per_minute: Optional[int] = None
+    tpm_limit: Optional[int] = None
+    max_concurrency: Optional[int] = None
+    expires_at: Optional[datetime] = None
 
 
 class KeyInfo(BaseModel):
@@ -38,10 +51,21 @@ class KeyInfo(BaseModel):
     tenant_id: str
     allowed_models: list[str]
     token_budget: Optional[int]
+    cost_budget_usd: Optional[float]
+    budget_period: str
+    rate_limit_per_minute: Optional[int]
+    tpm_limit: Optional[int]
+    max_concurrency: Optional[int]
+    expires_at: Optional[datetime]
+    last_used_at: Optional[datetime]
     active: bool
 
 
-@router.post("/keys", response_model=CreateKeyResponse)
+class CreateKeyResponse(KeyInfo):
+    key: str  # full virtual key, shown only once
+
+
+@router.post("/keys", response_model=CreateKeyResponse, dependencies=_WRITE)
 async def create_key(
     body: CreateKeyRequest,
     session: AsyncSession = Depends(get_session),
@@ -55,40 +79,64 @@ async def create_key(
         tenant_id=body.tenant_id,
         allowed_models=body.allowed_models,
         token_budget=body.token_budget,
+        cost_budget_usd=body.cost_budget_usd,
+        budget_period=body.budget_period,
+        rate_limit_per_minute=body.rate_limit_per_minute,
+        tpm_limit=body.tpm_limit,
+        max_concurrency=body.max_concurrency,
+        expires_at=body.expires_at,
     )
     session.add(key)
     await session.commit()
     await session.refresh(key)
 
-    return CreateKeyResponse(
+    return CreateKeyResponse(**_key_info(key).model_dump(), key=full_key)
+
+
+def _key_info(key: VirtualKey) -> KeyInfo:
+    return KeyInfo(
         id=key.id,
-        key=full_key,
-        key_prefix=prefix,
+        key_prefix=key.key_prefix,
         name=key.name,
         tenant_id=key.tenant_id,
         allowed_models=list(key.allowed_models or []),
         token_budget=key.token_budget,
+        cost_budget_usd=key.cost_budget_usd,
+        budget_period=key.budget_period or "total",
+        rate_limit_per_minute=key.rate_limit_per_minute,
+        tpm_limit=key.tpm_limit,
+        max_concurrency=key.max_concurrency,
+        expires_at=key.expires_at,
+        last_used_at=key.last_used_at,
+        active=key.active,
     )
 
 
 @router.get("/keys", response_model=list[KeyInfo])
 async def list_keys(session: AsyncSession = Depends(get_session)) -> list[KeyInfo]:
     result = await session.execute(select(VirtualKey).order_by(VirtualKey.id))
-    return [
-        KeyInfo(
-            id=key.id,
-            key_prefix=key.key_prefix,
-            name=key.name,
-            tenant_id=key.tenant_id,
-            allowed_models=list(key.allowed_models or []),
-            token_budget=key.token_budget,
-            active=key.active,
-        )
-        for key in result.scalars()
-    ]
+    return [_key_info(key) for key in result.scalars()]
 
 
-@router.delete("/keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.patch("/keys/{key_id}", response_model=KeyInfo, dependencies=_WRITE)
+async def update_key(
+    key_id: int,
+    body: UpdateKeyRequest,
+    session: AsyncSession = Depends(get_session),
+) -> KeyInfo:
+    key = await session.get(VirtualKey, key_id)
+    if key is None:
+        raise HTTPException(status_code=404, detail="key not found")
+    # Only apply fields the client actually sent (exclude_unset), so omitting a
+    # field leaves it unchanged while sending null clears it.
+    for field_name, value in body.model_dump(exclude_unset=True).items():
+        setattr(key, field_name, value)
+    await session.commit()
+    await session.refresh(key)
+    return _key_info(key)
+
+
+@router.delete("/keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=_WRITE)
 async def revoke_key(
     key_id: int, session: AsyncSession = Depends(get_session)
 ) -> Response:
@@ -320,3 +368,192 @@ async def usage_timeseries(
         )
         for d, model, provider, st, requests, prompt, completion, total, cost in rows
     ]
+
+
+# --- model registry ----------------------------------------------------------
+
+
+class ModelConfigRequest(BaseModel):
+    name: str
+    provider: str
+    alias_of: Optional[str] = None
+    input_price_per_1m: Optional[float] = None
+    output_price_per_1m: Optional[float] = None
+    default_rate_limit_per_minute: Optional[int] = None
+    default_tpm_limit: Optional[int] = None
+    enabled: bool = True
+
+
+class ModelConfigUpdate(BaseModel):
+    provider: Optional[str] = None
+    alias_of: Optional[str] = None
+    input_price_per_1m: Optional[float] = None
+    output_price_per_1m: Optional[float] = None
+    default_rate_limit_per_minute: Optional[int] = None
+    default_tpm_limit: Optional[int] = None
+    enabled: Optional[bool] = None
+
+
+class ModelConfigInfo(BaseModel):
+    id: int
+    name: str
+    provider: str
+    alias_of: Optional[str]
+    input_price_per_1m: Optional[float]
+    output_price_per_1m: Optional[float]
+    default_rate_limit_per_minute: Optional[int]
+    default_tpm_limit: Optional[int]
+    enabled: bool
+
+
+def _model_info(m: ModelConfig) -> ModelConfigInfo:
+    return ModelConfigInfo(
+        id=m.id,
+        name=m.name,
+        provider=m.provider,
+        alias_of=m.alias_of,
+        input_price_per_1m=m.input_price_per_1m,
+        output_price_per_1m=m.output_price_per_1m,
+        default_rate_limit_per_minute=m.default_rate_limit_per_minute,
+        default_tpm_limit=m.default_tpm_limit,
+        enabled=m.enabled,
+    )
+
+
+async def _reload_registry(request: Request) -> None:
+    await request.app.state.model_registry.reload(request.app.state.session_factory)
+
+
+@router.get("/models", response_model=list[ModelConfigInfo])
+async def list_model_configs(session: AsyncSession = Depends(get_session)) -> list[ModelConfigInfo]:
+    rows = (await session.execute(select(ModelConfig).order_by(ModelConfig.name))).scalars()
+    return [_model_info(m) for m in rows]
+
+
+@router.post("/models", response_model=ModelConfigInfo, dependencies=_WRITE)
+async def create_model_config(
+    body: ModelConfigRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> ModelConfigInfo:
+    exists = (
+        await session.execute(select(ModelConfig).where(ModelConfig.name == body.name))
+    ).scalar_one_or_none()
+    if exists is not None:
+        raise HTTPException(status_code=409, detail="model already registered")
+    model = ModelConfig(**body.model_dump())
+    session.add(model)
+    await session.commit()
+    await session.refresh(model)
+    await _reload_registry(request)
+    return _model_info(model)
+
+
+@router.patch("/models/{model_id}", response_model=ModelConfigInfo, dependencies=_WRITE)
+async def update_model_config(
+    model_id: int,
+    body: ModelConfigUpdate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> ModelConfigInfo:
+    model = await session.get(ModelConfig, model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail="model not found")
+    for field_name, value in body.model_dump(exclude_unset=True).items():
+        setattr(model, field_name, value)
+    await session.commit()
+    await session.refresh(model)
+    await _reload_registry(request)
+    return _model_info(model)
+
+
+@router.delete("/models/{model_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=_WRITE)
+async def delete_model_config(
+    model_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    model = await session.get(ModelConfig, model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail="model not found")
+    await session.delete(model)
+    await session.commit()
+    await _reload_registry(request)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- audit log ---------------------------------------------------------------
+
+
+class AuditTurn(BaseModel):
+    id: int
+    trace_id: Optional[str]
+    created_at: Optional[datetime]
+    prompt: str
+    response: str
+
+
+class AuditConversation(BaseModel):
+    conversation_id: Optional[str]
+    key_id: int
+    key_prefix: str
+    tenant_id: str
+    provider: str
+    model: str
+    turn_count: int
+    started_at: Optional[datetime]
+    last_at: Optional[datetime]
+    turns: list[AuditTurn]
+
+
+@router.get("/audit", response_model=list[AuditConversation])
+async def list_audit(
+    limit: int = 50, session: AsyncSession = Depends(get_session)
+) -> list[AuditConversation]:
+    """Captured prompt/response pairs, grouped into conversations by
+    conversation_id. Rows without one each stand alone as a single-turn entry.
+    Only populated when AUDIT_CAPTURE_CONTENT is enabled."""
+    limit = max(1, min(limit, 200))
+    # Pull a generous window of recent turns, then group in Python (newest first).
+    rows = (
+        await session.execute(select(AuditLog).order_by(AuditLog.id.desc()).limit(500))
+    ).scalars().all()
+    keys = {k.id: k for k in (await session.execute(select(VirtualKey))).scalars()}
+
+    groups: dict[str, list] = {}
+    order: list[str] = []  # first-seen order == most-recently-active first
+    for r in rows:
+        gid = r.conversation_id or f"__single_{r.id}"
+        if gid not in groups:
+            groups[gid] = []
+            order.append(gid)
+        groups[gid].append(r)
+
+    conversations: list[AuditConversation] = []
+    for gid in order[:limit]:
+        turns = sorted(groups[gid], key=lambda r: r.id)  # chronological within a convo
+        first, last = turns[0], turns[-1]
+        conversations.append(
+            AuditConversation(
+                conversation_id=first.conversation_id,
+                key_id=first.key_id,
+                key_prefix=(keys[first.key_id].key_prefix if first.key_id in keys else "—"),
+                tenant_id=first.tenant_id,
+                provider=last.provider,
+                model=last.model,
+                turn_count=len(turns),
+                started_at=first.created_at,
+                last_at=last.created_at,
+                turns=[
+                    AuditTurn(
+                        id=r.id,
+                        trace_id=r.trace_id,
+                        created_at=r.created_at,
+                        prompt=r.prompt,
+                        response=r.response,
+                    )
+                    for r in turns
+                ],
+            )
+        )
+    return conversations

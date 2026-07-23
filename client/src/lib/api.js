@@ -46,11 +46,14 @@ export function createApi({ baseUrl = "", adminToken = "" } = {}) {
     health: () => request(`${baseUrl}/health`),
     metrics: () => fetch(`${baseUrl}/metrics`).then((r) => r.text()),
     models: () => request(`${baseUrl}/v1/models`),
+    config: () => request(`${baseUrl}/v1/config`),
 
     // Admin — keys
     listKeys: () => request(`${baseUrl}/admin/keys`, { headers: admin() }),
     createKey: (body) =>
       request(`${baseUrl}/admin/keys`, { method: "POST", body, headers: admin() }),
+    updateKey: (id, body) =>
+      request(`${baseUrl}/admin/keys/${id}`, { method: "PATCH", body, headers: admin() }),
     revokeKey: (id) =>
       request(`${baseUrl}/admin/keys/${id}`, { method: "DELETE", headers: admin() }),
 
@@ -63,24 +66,43 @@ export function createApi({ baseUrl = "", adminToken = "" } = {}) {
       request(`${baseUrl}/admin/usage/recent?limit=${limit}`, { headers: admin() }),
     usageTimeseries: (days = 14) =>
       request(`${baseUrl}/admin/usage/timeseries?days=${days}`, { headers: admin() }),
+    audit: (limit = 50) =>
+      request(`${baseUrl}/admin/audit?limit=${limit}`, { headers: admin() }),
+
+    // Admin — model registry
+    listModelConfigs: () => request(`${baseUrl}/admin/models`, { headers: admin() }),
+    createModelConfig: (body) =>
+      request(`${baseUrl}/admin/models`, { method: "POST", body, headers: admin() }),
+    updateModelConfig: (id, body) =>
+      request(`${baseUrl}/admin/models/${id}`, { method: "PATCH", body, headers: admin() }),
+    deleteModelConfig: (id) =>
+      request(`${baseUrl}/admin/models/${id}`, { method: "DELETE", headers: admin() }),
 
     // Chat (playground) — non-streaming
-    chat: (apiKey, body) =>
+    chat: (apiKey, body, conversationId) =>
       request(`${baseUrl}/v1/chat/completions`, {
         method: "POST",
         body,
-        headers: { Authorization: `Bearer ${apiKey}` },
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          ...(conversationId ? { "X-Conversation-ID": conversationId } : {}),
+        },
       }),
   };
 }
 
 // Streaming chat: reads the SSE response and calls onDelta with each token.
-export async function chatStream({ baseUrl = "", apiKey }, body, { onDelta, signal } = {}) {
+export async function chatStream(
+  { baseUrl = "", apiKey, conversationId },
+  body,
+  { onDelta, signal } = {}
+) {
   const res = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
+      ...(conversationId ? { "X-Conversation-ID": conversationId } : {}),
     },
     body: JSON.stringify({ ...body, stream: true }),
     signal,

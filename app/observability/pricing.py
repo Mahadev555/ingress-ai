@@ -15,7 +15,20 @@ PRICES: dict[str, tuple[float, float]] = {
 }
 
 
+# Exact-name price overrides loaded from the DB model registry (USD per 1M).
+_OVERRIDES: dict[str, tuple[float, float]] = {}
+
+
+def set_overrides(overrides: dict[str, tuple[float, float]]) -> None:
+    """Replace the DB-sourced price overrides (called by the model registry)."""
+    global _OVERRIDES
+    _OVERRIDES = dict(overrides)
+
+
 def _lookup(model: str) -> tuple[float, float]:
+    # An exact registry override wins over the static prefix table.
+    if model in _OVERRIDES:
+        return _OVERRIDES[model]
     # Longest matching prefix wins (handles versioned model names).
     best: tuple[float, float] = (0.0, 0.0)
     best_len = -1
