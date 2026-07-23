@@ -120,6 +120,14 @@ export default function Playground() {
   const abortRef = useRef(null);
   const scrollRef = useRef(null);
 
+  // Conversation window: one id groups all its turns in the audit log; after
+  // maxTurns (a backend hint) the user must start a fresh chat.
+  const configQuery = useAsync(() => api.config(), [api]);
+  const maxTurns = configQuery.data?.max_conversation_turns ?? 5;
+  const [conversationId, setConversationId] = useState(() => crypto.randomUUID());
+  const turnsUsed = messages.filter((m) => m.role === "user").length;
+  const limitReached = turnsUsed >= maxTurns;
+
   const scrollDown = () =>
     requestAnimationFrame(() => {
       const el = scrollRef.current;
@@ -127,7 +135,7 @@ export default function Playground() {
     });
 
   const send = async () => {
-    if (!input.trim() || busy) return;
+    if (!input.trim() || busy || limitReached) return;
     if (!effectiveModel) {
       setError(new Error("Enter a model name."));
       return;
@@ -169,13 +177,13 @@ export default function Playground() {
       if (streaming) {
         abortRef.current = new AbortController();
         await chatStream(
-          { baseUrl: apiBase, apiKey: virtualKey },
+          { baseUrl: apiBase, apiKey: virtualKey, conversationId },
           payload,
           { onDelta: pushDelta, signal: abortRef.current.signal }
         );
       } else {
-        const api = createApi({ baseUrl: apiBase });
-        const res = await api.chat(virtualKey, payload);
+        const client = createApi({ baseUrl: apiBase });
+        const res = await client.chat(virtualKey, payload, conversationId);
         pushDelta(res?.choices?.[0]?.message?.content ?? "");
       }
     } catch (e) {
@@ -190,9 +198,10 @@ export default function Playground() {
   };
 
   const stop = () => abortRef.current?.abort();
-  const clear = () => {
+  const newChat = () => {
     setMessages([]);
     setError(null);
+    setConversationId(crypto.randomUUID()); // a fresh conversation id
   };
 
   return (
@@ -204,9 +213,12 @@ export default function Playground() {
             <span className="text-sm font-semibold text-slate-900">Chat</span>
             <Badge tone="brand">{effectiveModel || "no model"}</Badge>
             {streaming && <Badge tone="green">streaming</Badge>}
+            <Badge tone={limitReached ? "amber" : "slate"}>
+              {turnsUsed}/{maxTurns} turns
+            </Badge>
           </div>
-          <Button variant="ghost" onClick={clear} disabled={!messages.length}>
-            <Eraser size={15} /> Clear
+          <Button variant="ghost" onClick={newChat} disabled={!messages.length}>
+            <Eraser size={15} /> New chat
           </Button>
         </div>
 
@@ -244,12 +256,29 @@ export default function Playground() {
           </div>
         )}
 
+        {limitReached && (
+          <div className="mx-5 mb-2 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <span className="flex items-center gap-2">
+              <AlertCircle size={14} className="shrink-0" />
+              Context length full ({maxTurns} turns). Start a new chat to continue.
+            </span>
+            <Button variant="secondary" onClick={newChat} className="shrink-0">
+              <Eraser size={14} /> New chat
+            </Button>
+          </div>
+        )}
+
         <div className="border-t border-slate-100 p-4">
           <div className="flex items-end gap-2">
             <Textarea
               rows={2}
-              placeholder="Type a message…  (Enter to send, Shift+Enter for newline)"
+              placeholder={
+                limitReached
+                  ? "Context full — start a new chat to keep going."
+                  : "Type a message…  (Enter to send, Shift+Enter for newline)"
+              }
               value={input}
+              disabled={limitReached}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -266,7 +295,7 @@ export default function Playground() {
               <Button
                 onClick={send}
                 loading={busy}
-                disabled={!virtualKey || !input.trim()}
+                disabled={!virtualKey || !input.trim() || limitReached}
                 className="h-[42px]"
               >
                 <SendHorizonal size={15} /> Send

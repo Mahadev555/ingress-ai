@@ -19,42 +19,64 @@ function when(iso) {
   return new Date(iso).toLocaleString();
 }
 
-function preview(text, n = 80) {
+function preview(text, n = 70) {
   const t = (text || "").replace(/\s+/g, " ").trim();
   return t.length > n ? `${t.slice(0, n)}…` : t || "—";
 }
 
-// Left = Request (prompt), right = Response — a single pair, not a thread.
-function Pane({ title, tone, text }) {
+// Left = Request (prompt), right = Response — a single pair per turn.
+function Pair({ turn, index }) {
   return (
-    <div className="flex min-h-0 flex-col">
-      <div className="mb-2 flex items-center gap-2">
-        <span className={`h-2 w-2 rounded-full ${tone}`} />
-        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</span>
+    <div>
+      <div className="mb-1.5 flex items-center gap-2 text-xs text-slate-400">
+        <span className="font-semibold text-slate-500">Turn {index + 1}</span>
+        <span>· {when(turn.created_at)}</span>
+        {turn.trace_id && <code className="text-[11px]">trace {turn.trace_id}</code>}
       </div>
-      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs leading-relaxed text-slate-700">
-        {text || "—"}
-      </pre>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div>
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            <span className="h-2 w-2 rounded-full bg-brand-500" /> Request
+          </div>
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-700">
+            {turn.prompt || "—"}
+          </pre>
+        </div>
+        <div>
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" /> Response
+          </div>
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-700">
+            {turn.response || "—"}
+          </pre>
+        </div>
+      </div>
     </div>
   );
 }
 
-function AuditDetail({ entry, onClose }) {
+function ConversationDetail({ convo, onClose }) {
   return (
-    <Modal open={!!entry} onClose={onClose} title="Audit entry" maxWidth="max-w-4xl">
-      {entry && (
-        <div className="flex h-[60vh] flex-col gap-4">
+    <Modal open={!!convo} onClose={onClose} title="Conversation" maxWidth="max-w-4xl">
+      {convo && (
+        <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <Badge tone="brand">{entry.model}</Badge>
-            <Badge tone="slate">{entry.provider}</Badge>
-            <span>key #{entry.key_id}</span>
-            <span>· {entry.tenant_id}</span>
-            <span>· {when(entry.created_at)}</span>
-            {entry.trace_id && <code className="text-[11px]">trace {entry.trace_id}</code>}
+            <Badge tone="brand">{convo.model}</Badge>
+            <Badge tone="slate">{convo.provider}</Badge>
+            <Badge tone="slate">{convo.turn_count} turns</Badge>
+            <span>
+              key <code className="text-[11px]">{convo.key_prefix}…</code>
+            </span>
+            <span>· {convo.tenant_id}</span>
+            <span>· {when(convo.started_at)}</span>
+            {convo.conversation_id && (
+              <code className="text-[11px]">conv {convo.conversation_id}</code>
+            )}
           </div>
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-2">
-            <Pane title="Request" tone="bg-brand-500" text={entry.prompt} />
-            <Pane title="Response" tone="bg-emerald-500" text={entry.response} />
+          <div className="space-y-5">
+            {convo.turns.map((t, i) => (
+              <Pair key={t.id} turn={t} index={i} />
+            ))}
           </div>
         </div>
       )}
@@ -73,7 +95,7 @@ export default function Audit() {
     <Card>
       <CardHeader
         title="Audit logs"
-        subtitle="Captured request/response pairs. Click a row to inspect."
+        subtitle="Captured conversations (grouped by conversation id). Click a row to inspect all turns."
         action={
           <Button variant="ghost" onClick={list.reload}>
             Refresh
@@ -96,26 +118,36 @@ export default function Audit() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-400">
-                <th className="px-5 py-3 font-semibold">Time</th>
+                <th className="px-5 py-3 font-semibold">Last activity</th>
                 <th className="px-5 py-3 font-semibold">Model</th>
-                <th className="px-5 py-3 font-semibold">Request</th>
-                <th className="px-5 py-3 font-semibold">Response</th>
+                <th className="px-5 py-3 font-semibold">Key</th>
+                <th className="px-5 py-3 font-semibold">Turns</th>
+                <th className="px-5 py-3 font-semibold">Latest request</th>
                 <th className="px-5 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {list.data.map((e) => (
+              {list.data.map((c, idx) => (
                 <tr
-                  key={e.id}
+                  key={c.conversation_id || `single-${idx}`}
                   className="cursor-pointer hover:bg-slate-50/60"
-                  onClick={() => setSelected(e)}
+                  onClick={() => setSelected(c)}
                 >
-                  <td className="px-5 py-3 whitespace-nowrap text-xs text-slate-500">{when(e.created_at)}</td>
+                  <td className="px-5 py-3 whitespace-nowrap text-xs text-slate-500">{when(c.last_at)}</td>
                   <td className="px-5 py-3">
-                    <Badge tone="brand">{e.model}</Badge>
+                    <Badge tone="brand">{c.model}</Badge>
                   </td>
-                  <td className="px-5 py-3 max-w-xs truncate text-slate-600">{preview(e.prompt)}</td>
-                  <td className="px-5 py-3 max-w-xs truncate text-slate-500">{preview(e.response)}</td>
+                  <td className="px-5 py-3">
+                    <code className="rounded bg-slate-100 px-2 py-1 font-mono text-xs text-slate-600">
+                      {c.key_prefix}…
+                    </code>
+                  </td>
+                  <td className="px-5 py-3">
+                    <Badge tone={c.turn_count > 1 ? "brand" : "slate"}>{c.turn_count}</Badge>
+                  </td>
+                  <td className="px-5 py-3 max-w-md truncate text-slate-600">
+                    {preview(c.turns[c.turns.length - 1]?.prompt)}
+                  </td>
                   <td className="px-5 py-3 text-right text-slate-400">
                     <ArrowRight size={15} />
                   </td>
@@ -126,7 +158,7 @@ export default function Audit() {
         </div>
       )}
 
-      <AuditDetail entry={selected} onClose={() => setSelected(null)} />
+      <ConversationDetail convo={selected} onClose={() => setSelected(null)} />
     </Card>
   );
 }
