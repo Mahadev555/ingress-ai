@@ -96,6 +96,8 @@ class AuditLog(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     trace_id: Mapped[Optional[str]] = mapped_column(String(36), index=True, nullable=True)
+    # Groups the turns of one chat window into a single audit conversation.
+    conversation_id: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)
     key_id: Mapped[int] = mapped_column(Integer, index=True)
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
     provider: Mapped[str] = mapped_column(String(32))

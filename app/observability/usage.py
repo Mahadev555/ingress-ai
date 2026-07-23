@@ -17,6 +17,7 @@ async def write_audit(
     session_factory: async_sessionmaker[AsyncSession],
     *,
     trace_id: str | None,
+    conversation_id: str | None,
     key_id: int,
     tenant_id: str,
     provider: str,
@@ -30,6 +31,7 @@ async def write_audit(
             session.add(
                 AuditLog(
                     trace_id=trace_id,
+                    conversation_id=conversation_id,
                     key_id=key_id,
                     tenant_id=tenant_id,
                     provider=provider,

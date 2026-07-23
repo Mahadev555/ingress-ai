@@ -63,16 +63,27 @@ async def _metered_stream(first: bytes | None, stream, usage_holder: dict, on_do
             on_done()
 
 
-def _message_text(message) -> str:
-    content = getattr(message, "content", "")
+def _content_text(content) -> str:
     if isinstance(content, str):
-        return f"{message.role}: {content}"
+        return content
     if isinstance(content, list):
-        text = "".join(
+        return "".join(
             p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"
         )
-        return f"{message.role}: {text}"
-    return f"{message.role}: {content}"
+    return "" if content is None else str(content)
+
+
+def _message_text(message) -> str:
+    return f"{message.role}: {_content_text(message.content)}"
+
+
+def _latest_user_prompt(messages) -> str:
+    """The most recent user message only — clients resend the whole history on
+    every turn, so auditing that would duplicate prior turns. One pair per entry."""
+    for message in reversed(messages):
+        if message.role == "user":
+            return _content_text(message.content)
+    return ""
 
 
 def _response_text(body: dict) -> str:
@@ -81,7 +92,8 @@ def _response_text(body: dict) -> str:
 
 
 def _sniff_usage(chunk: bytes, usage_holder: dict) -> None:
-    """Pull token counts out of an OpenAI-style usage chunk, if present."""
+    """Pull token counts (and, for audit, the assistant text) out of the SSE
+    chunks as they flow past."""
     for line in chunk.decode("utf-8", "ignore").splitlines():
         line = line.strip()
         if not line.startswith("data:"):
@@ -90,9 +102,10 @@ def _sniff_usage(chunk: bytes, usage_holder: dict) -> None:
         if not data or data == "[DONE]":
             continue
         try:
-            usage = json.loads(data).get("usage")
+            obj = json.loads(data)
         except ValueError:
             continue
+        usage = obj.get("usage")
         if usage:
             usage_holder["prompt_tokens"] = usage.get("prompt_tokens", 0)
             usage_holder["completion_tokens"] = usage.get("completion_tokens", 0)
@@ -100,10 +113,20 @@ def _sniff_usage(chunk: bytes, usage_holder: dict) -> None:
                 "total_tokens",
                 usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0),
             )
+        try:
+            delta = (obj.get("choices") or [{}])[0].get("delta", {}).get("content")
+        except (AttributeError, IndexError):
+            delta = None
+        if delta:
+            usage_holder["content"] = usage_holder.get("content", "") + delta
 
 
-async def _record_stream_usage(session_factory, key, provider, model, usage_holder, started, trace_id=None):
-    """Record a streamed request's usage once the stream has drained."""
+async def _record_stream_usage(
+    session_factory, key, provider, model, usage_holder, started,
+    trace_id=None, audit=False, prompt="", conversation_id=None,
+):
+    """Record a streamed request's usage (and audit its content) once the
+    stream has drained — the assistant text was accumulated as it flowed."""
     event = UsageEvent(
         key_id=key.key_id,
         tenant_id=key.tenant_id,
@@ -120,6 +143,18 @@ async def _record_stream_usage(session_factory, key, provider, model, usage_hold
     )
     observe(event)
     await record_usage(session_factory, event)
+    if audit:
+        await write_audit(
+            session_factory,
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+            key_id=key.key_id,
+            tenant_id=key.tenant_id,
+            provider=provider,
+            model=model,
+            prompt=prompt,
+            response=usage_holder.get("content", ""),
+        )
 
 
 @router.get("/models")
@@ -148,6 +183,13 @@ async def list_models(
     return {"object": "list", "data": data}
 
 
+@router.get("/config")
+async def client_config() -> dict:
+    """Public client-facing config (e.g. the playground's conversation limit)."""
+    settings = get_settings()
+    return {"max_conversation_turns": settings.max_conversation_turns}
+
+
 @router.post("/chat/completions")
 async def create_chat_completion(
     payload: ChatCompletionRequest,
@@ -155,6 +197,7 @@ async def create_chat_completion(
     background: BackgroundTasks,
     key: KeyContext = Depends(require_key),
     session: AsyncSession = Depends(get_session),
+    x_conversation_id: Optional[str] = Header(default=None),
 ) -> Any:
     if not key.allows_model(payload.model):
         raise HTTPException(
@@ -269,7 +312,7 @@ async def create_chat_completion(
 
             # Sniff the final usage chunk as the stream flows, then record real
             # tokens/cost once it finishes (the background task runs after that).
-            usage_holder = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            usage_holder = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "content": ""}
             background.add_task(
                 _record_stream_usage,
                 request.app.state.session_factory,
@@ -279,6 +322,9 @@ async def create_chat_completion(
                 usage_holder,
                 started,
                 getattr(request.state, "request_id", None),
+                audit=settings.audit_capture_content,
+                prompt=_latest_user_prompt(payload.messages),
+                conversation_id=x_conversation_id,
             )
             handed_off = True
             return StreamingResponse(
@@ -323,11 +369,12 @@ async def create_chat_completion(
                     write_audit,
                     request.app.state.session_factory,
                     trace_id=getattr(request.state, "request_id", None),
+                    conversation_id=x_conversation_id,
                     key_id=key.key_id,
                     tenant_id=key.tenant_id,
                     provider=outcome.candidate.provider,
                     model=outcome.candidate.model,
-                    prompt="\n".join(_message_text(m) for m in payload.messages),
+                    prompt=_latest_user_prompt(payload.messages),
                     response=_response_text(body),
                 )
             return JSONResponse(content=body, headers={"X-Cache": "MISS"})

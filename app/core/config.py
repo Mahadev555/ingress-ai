@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     # Capture redacted prompt+response text to the audit_logs table (off by default).
     audit_capture_content: bool = False
 
+    # Playground: max turns per chat window before forcing a new conversation.
+    max_conversation_turns: int = 5
+
     # Guardrails.
     max_request_bytes: int = 1_000_000  # reject bodies larger than this (413)
     max_output_tokens_cap: int = 0  # clamp requested max_tokens to this (0 = no cap)

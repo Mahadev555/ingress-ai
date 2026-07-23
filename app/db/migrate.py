@@ -28,6 +28,9 @@ def _additive_columns(dialect: str) -> dict[str, dict[str, str]]:
         "usage_records": {
             "trace_id": "VARCHAR(36)",
         },
+        "audit_logs": {
+            "conversation_id": "VARCHAR(64)",
+        },
     }
 
 

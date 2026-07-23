@@ -485,39 +485,75 @@ async def delete_model_config(
 # --- audit log ---------------------------------------------------------------
 
 
-class AuditEntry(BaseModel):
+class AuditTurn(BaseModel):
     id: int
     trace_id: Optional[str]
     created_at: Optional[datetime]
-    key_id: int
-    tenant_id: str
-    provider: str
-    model: str
     prompt: str
     response: str
 
 
-@router.get("/audit", response_model=list[AuditEntry])
+class AuditConversation(BaseModel):
+    conversation_id: Optional[str]
+    key_id: int
+    key_prefix: str
+    tenant_id: str
+    provider: str
+    model: str
+    turn_count: int
+    started_at: Optional[datetime]
+    last_at: Optional[datetime]
+    turns: list[AuditTurn]
+
+
+@router.get("/audit", response_model=list[AuditConversation])
 async def list_audit(
     limit: int = 50, session: AsyncSession = Depends(get_session)
-) -> list[AuditEntry]:
-    """Recent captured prompt/response pairs (only populated when
-    AUDIT_CAPTURE_CONTENT is enabled)."""
+) -> list[AuditConversation]:
+    """Captured prompt/response pairs, grouped into conversations by
+    conversation_id. Rows without one each stand alone as a single-turn entry.
+    Only populated when AUDIT_CAPTURE_CONTENT is enabled."""
     limit = max(1, min(limit, 200))
+    # Pull a generous window of recent turns, then group in Python (newest first).
     rows = (
-        await session.execute(select(AuditLog).order_by(AuditLog.id.desc()).limit(limit))
+        await session.execute(select(AuditLog).order_by(AuditLog.id.desc()).limit(500))
     ).scalars().all()
-    return [
-        AuditEntry(
-            id=r.id,
-            trace_id=r.trace_id,
-            created_at=r.created_at,
-            key_id=r.key_id,
-            tenant_id=r.tenant_id,
-            provider=r.provider,
-            model=r.model,
-            prompt=r.prompt,
-            response=r.response,
+    keys = {k.id: k for k in (await session.execute(select(VirtualKey))).scalars()}
+
+    groups: dict[str, list] = {}
+    order: list[str] = []  # first-seen order == most-recently-active first
+    for r in rows:
+        gid = r.conversation_id or f"__single_{r.id}"
+        if gid not in groups:
+            groups[gid] = []
+            order.append(gid)
+        groups[gid].append(r)
+
+    conversations: list[AuditConversation] = []
+    for gid in order[:limit]:
+        turns = sorted(groups[gid], key=lambda r: r.id)  # chronological within a convo
+        first, last = turns[0], turns[-1]
+        conversations.append(
+            AuditConversation(
+                conversation_id=first.conversation_id,
+                key_id=first.key_id,
+                key_prefix=(keys[first.key_id].key_prefix if first.key_id in keys else "—"),
+                tenant_id=first.tenant_id,
+                provider=last.provider,
+                model=last.model,
+                turn_count=len(turns),
+                started_at=first.created_at,
+                last_at=last.created_at,
+                turns=[
+                    AuditTurn(
+                        id=r.id,
+                        trace_id=r.trace_id,
+                        created_at=r.created_at,
+                        prompt=r.prompt,
+                        response=r.response,
+                    )
+                    for r in turns
+                ],
+            )
         )
-        for r in rows
-    ]
+    return conversations
