@@ -53,13 +53,15 @@ flowchart LR
 
 ## Features
 
-- **Unified API** — OpenAI-compatible `/v1/chat/completions`, streaming and non-streaming.
+- **Unified API** — OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings`, streaming and non-streaming.
 - **4 providers, one interface** — OpenAI, Anthropic, Azure OpenAI, Google Gemini, routed by model name.
 - **Virtual keys** — hashed, per-key allowed models, admin-managed; provider keys never leave the server.
-- **Rate limiting** — token bucket per key + model, `429` + `Retry-After` (in-memory or Redis).
+- **Per-key governance** — request/min and token/min limits, concurrency caps, token & cost budgets (daily/monthly), and key expiry.
+- **Model registry** — DB-backed pricing, aliases, enable/disable, and default limits (overrides the env model list).
 - **Resilience** — retry with backoff, fail-over to fallback models, per-provider circuit breaker.
 - **Caching** — exact-match response cache, per-tenant (`X-Cache: HIT/MISS`).
-- **Observability** — usage/cost ledger (queryable per key), Prometheus `/metrics`, secret-redacting logs.
+- **Observability** — usage/cost ledger (queryable per key), Prometheus `/metrics`, trace IDs, optional redacted audit capture.
+- **Guardrails** — request-size limits, `max_tokens` caps, and opt-in prompt-injection screening.
 - **Dashboard** — a React console (`client/`) for keys, a chat playground, and usage/metrics.
 
 ## Screenshots
@@ -226,8 +228,18 @@ All require the `X-Admin-Token` header (set `ADMIN_API_KEY`).
 |---|---|---|
 | `POST` | `/admin/keys` | Create a virtual key (full key returned once) |
 | `GET` | `/admin/keys` | List keys (prefix + metadata only) |
+| `PATCH` | `/admin/keys/{id}` | Edit a key (name, models, limits, budgets, expiry) |
 | `DELETE` | `/admin/keys/{id}` | Revoke a key (deactivates, keeps usage history) |
 | `GET` | `/admin/usage` | Usage totals (requests, tokens, cost) |
+| `GET/POST/PATCH/DELETE` | `/admin/models` | Model registry (pricing, aliases, enable/disable, default limits) |
+| `GET` | `/admin/audit` | Captured prompt/response pairs (when audit is enabled) |
+
+Reads accept any admin token (including `ADMIN_READ_TOKENS`); create/edit/delete
+require a full-admin token (`ADMIN_API_KEY` or `ADMIN_TOKENS`).
+
+Per-key controls (set on create or `PATCH`): `rate_limit_per_minute`, `tpm_limit`
+(tokens/min), `max_concurrency`, `token_budget` / `cost_budget_usd` with a
+`budget_period` of `total`/`daily`/`monthly`, and `expires_at`.
 
 ## Deploy
 
