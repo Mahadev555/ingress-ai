@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, Check, ChevronDown, Loader2, X } from "lucide-react";
 
 export function cx(...parts) {
@@ -244,31 +245,36 @@ export function Modal({ open, onClose, title, children, footer, maxWidth = "max-
   }, [open, onClose]);
 
   if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
-      <div
-        className={cx(
-          "relative flex max-h-[90vh] w-full flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl animate-fade-in",
-          maxWidth
-        )}
-      >
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
-          <button
-            onClick={onClose}
-            className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        <div className="overflow-y-auto px-5 py-4">{children}</div>
-        {footer && (
-          <div className="flex shrink-0 justify-end gap-2 border-t border-slate-100 px-5 py-3">
-            {footer}
+  // Portal to <body> so the page's scroll/overflow context can't clip the
+  // fixed overlay, and the modal is measured against the real viewport.
+  return createPortal(
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative flex min-h-full items-center justify-center p-4">
+        <div
+          className={cx(
+            "relative flex max-h-[85dvh] w-full flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl animate-fade-in",
+            maxWidth
+          )}
+        >
+          <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-5 py-4">
+            <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+            <button
+              onClick={onClose}
+              className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            >
+              <X size={18} />
+            </button>
           </div>
-        )}
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+          {footer && (
+            <div className="flex shrink-0 justify-end gap-2 border-t border-slate-100 px-5 py-3">
+              {footer}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
