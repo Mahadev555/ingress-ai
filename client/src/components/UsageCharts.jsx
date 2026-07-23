@@ -139,9 +139,8 @@ export default function UsageCharts({ rows, days = 14 }) {
                 name="Success rate"
                 stroke="#0d9488"
                 strokeWidth={1.5}
-                strokeDasharray="4 3"
-                dot={false}
-                connectNulls
+                dot={{ r: 2, fill: "#0d9488", strokeWidth: 0 }}
+                activeDot={{ r: 3 }}
               />
             </ComposedChart>
             </Chart>
