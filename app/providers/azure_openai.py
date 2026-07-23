@@ -1,5 +1,9 @@
-from app.providers.base import NativeRequest, ProviderCreds
-from app.providers.openai import OpenAIAdapter
+from typing import Any
+
+import httpx
+
+from app.providers.base import NativeRequest, ProviderCreds, UpstreamStreamError
+from app.providers.openai import OpenAIAdapter, _safe_json
 from app.schemas.unified import GATEWAY_ONLY_FIELDS, ChatCompletionRequest
 
 # Models are addressed as "azure/<deployment>"; this prefix selects the adapter
@@ -30,6 +34,25 @@ class AzureOpenAIAdapter(OpenAIAdapter):
             headers={"api-key": creds.api_key, "Content-Type": "application/json"},
             json=body,
         )
+
+    async def embed(
+        self,
+        model: str,
+        payload: dict[str, Any],
+        creds: ProviderCreds,
+        client: httpx.AsyncClient,
+    ) -> dict[str, Any]:
+        deployment = _deployment_name(model)
+        api_version = creds.extra.get("api_version", "")
+        body = {k: v for k, v in payload.items() if k != "model"}
+        resp = await client.post(
+            f"{creds.base_url}/openai/deployments/{deployment}/embeddings?api-version={api_version}",
+            headers={"api-key": creds.api_key, "Content-Type": "application/json"},
+            json=body,
+        )
+        if resp.status_code != 200:
+            raise UpstreamStreamError(resp.status_code, _safe_json(resp))
+        return resp.json()
 
 
 def _deployment_name(model: str) -> str:

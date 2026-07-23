@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -17,3 +18,4 @@ class UsageEvent:
     latency_ms: int
     status: int
     cache_hit: bool
+    trace_id: Optional[str] = None

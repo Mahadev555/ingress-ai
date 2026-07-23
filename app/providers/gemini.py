@@ -121,6 +121,39 @@ class GeminiAdapter(ProviderAdapter):
 
         yield b"data: [DONE]\n\n"
 
+    async def embed(
+        self,
+        model: str,
+        payload: dict[str, Any],
+        creds: ProviderCreds,
+        client: httpx.AsyncClient,
+    ) -> dict[str, Any]:
+        # Accept OpenAI's `input` (str or list) and fan out to Gemini's
+        # batchEmbedContents, then translate back to OpenAI's embeddings shape.
+        raw = payload.get("input", "")
+        inputs = raw if isinstance(raw, list) else [raw]
+        requests = [
+            {"model": f"models/{model}", "content": {"parts": [{"text": str(text)}]}}
+            for text in inputs
+        ]
+        resp = await client.post(
+            f"{creds.base_url}/models/{model}:batchEmbedContents?key={creds.api_key}",
+            headers={"Content-Type": "application/json"},
+            json={"requests": requests},
+        )
+        if resp.status_code != 200:
+            raise UpstreamStreamError(resp.status_code, await read_stream_error(resp))
+        embeddings = resp.json().get("embeddings", [])
+        return {
+            "object": "list",
+            "model": model,
+            "data": [
+                {"object": "embedding", "index": i, "embedding": e.get("values", [])}
+                for i, e in enumerate(embeddings)
+            ],
+            "usage": {"prompt_tokens": 0, "total_tokens": 0},
+        }
+
     def _native(
         self, req: ChatCompletionRequest, creds: ProviderCreds, streaming: bool
     ) -> NativeRequest:

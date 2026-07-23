@@ -1,12 +1,15 @@
+import uuid
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request, Response
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api import admin, chat
 from app.core.cache import create_cache
+from app.core.concurrency import ConcurrencyLimiter
 from app.core.config import get_settings
+from app.core.model_registry import registry as model_registry
 from app.core.ratelimit import create_rate_limiter
 from app.db.session import create_engine, init_models
 from app.observability.logging import configure_logging
@@ -31,12 +34,16 @@ async def lifespan(app: FastAPI):
     app.state.db_engine = engine
     app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
+    await model_registry.reload(app.state.session_factory)
+    app.state.model_registry = model_registry
+
     app.state.rate_limiter = create_rate_limiter(settings)
     app.state.circuit_breaker = CircuitBreaker(
         fail_threshold=settings.circuit_fail_threshold,
         reset_timeout=settings.circuit_reset_seconds,
     )
     app.state.cache = create_cache(settings)
+    app.state.concurrency = ConcurrencyLimiter()
 
     try:
         yield
@@ -48,6 +55,30 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Ingress AI Gateway", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """Assign a trace/request id (honoring an inbound X-Request-ID) and echo it
+    back on the response so a request can be correlated across logs and usage.
+    Also rejects over-large request bodies (a cheap guardrail)."""
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+    request.state.request_id = request_id
+
+    max_bytes = get_settings().max_request_bytes
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > max_bytes:
+        return Response(
+            content='{"error": {"message": "request body too large", "type": "payload_too_large"}}',
+            status_code=413,
+            media_type="application/json",
+            headers={"X-Request-ID": request_id},
+        )
+
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
 
 app.include_router(chat.router, prefix="/v1")
 app.include_router(admin.router, prefix="/admin")

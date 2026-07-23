@@ -19,6 +19,14 @@ class UpstreamStreamError(Exception):
         self.body = body
 
 
+class EmbeddingsUnsupported(Exception):
+    """Raised by adapters whose provider has no embeddings API (e.g. Anthropic)."""
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(f"{provider} does not support embeddings")
+        self.provider = provider
+
+
 async def read_stream_error(upstream: httpx.Response) -> Optional[dict]:
     """Read and JSON-parse an errored streaming response body, if possible."""
     try:
@@ -70,3 +78,15 @@ class ProviderAdapter(ABC):
         client: httpx.AsyncClient,
     ) -> AsyncIterator[bytes]:
         """Yield unified SSE chunks (``data: {...}\\n\\n``) for a streaming call."""
+
+    async def embed(
+        self,
+        model: str,
+        payload: dict[str, Any],
+        creds: ProviderCreds,
+        client: httpx.AsyncClient,
+    ) -> dict[str, Any]:
+        """Return an OpenAI-shaped embeddings response. Providers without an
+        embeddings API leave this default, which reports the capability is
+        unsupported. Raise ``UpstreamStreamError`` on an upstream HTTP error."""
+        raise EmbeddingsUnsupported(type(self).__name__)
