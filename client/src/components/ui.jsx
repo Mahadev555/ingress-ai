@@ -249,11 +249,11 @@ export function Modal({ open, onClose, title, children, footer, maxWidth = "max-
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
       <div
         className={cx(
-          "relative w-full rounded-2xl border border-slate-200 bg-white shadow-2xl animate-fade-in",
+          "relative flex max-h-[90vh] w-full flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl animate-fade-in",
           maxWidth
         )}
       >
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-5 py-4">
           <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
           <button
             onClick={onClose}
@@ -262,9 +262,11 @@ export function Modal({ open, onClose, title, children, footer, maxWidth = "max-
             <X size={18} />
           </button>
         </div>
-        <div className="px-5 py-4">{children}</div>
+        <div className="overflow-y-auto px-5 py-4">{children}</div>
         {footer && (
-          <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-3">{footer}</div>
+          <div className="flex shrink-0 justify-end gap-2 border-t border-slate-100 px-5 py-3">
+            {footer}
+          </div>
         )}
       </div>
     </div>

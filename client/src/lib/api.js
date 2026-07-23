@@ -51,6 +51,8 @@ export function createApi({ baseUrl = "", adminToken = "" } = {}) {
     listKeys: () => request(`${baseUrl}/admin/keys`, { headers: admin() }),
     createKey: (body) =>
       request(`${baseUrl}/admin/keys`, { method: "POST", body, headers: admin() }),
+    updateKey: (id, body) =>
+      request(`${baseUrl}/admin/keys/${id}`, { method: "PATCH", body, headers: admin() }),
     revokeKey: (id) =>
       request(`${baseUrl}/admin/keys/${id}`, { method: "DELETE", headers: admin() }),
 
@@ -63,6 +65,15 @@ export function createApi({ baseUrl = "", adminToken = "" } = {}) {
       request(`${baseUrl}/admin/usage/recent?limit=${limit}`, { headers: admin() }),
     usageTimeseries: (days = 14) =>
       request(`${baseUrl}/admin/usage/timeseries?days=${days}`, { headers: admin() }),
+
+    // Admin — model registry
+    listModelConfigs: () => request(`${baseUrl}/admin/models`, { headers: admin() }),
+    createModelConfig: (body) =>
+      request(`${baseUrl}/admin/models`, { method: "POST", body, headers: admin() }),
+    updateModelConfig: (id, body) =>
+      request(`${baseUrl}/admin/models/${id}`, { method: "PATCH", body, headers: admin() }),
+    deleteModelConfig: (id) =>
+      request(`${baseUrl}/admin/models/${id}`, { method: "DELETE", headers: admin() }),
 
     // Chat (playground) — non-streaming
     chat: (apiKey, body) =>

@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   BarChart3,
+  Boxes,
   KeyRound,
   LayoutDashboard,
   Settings as SettingsIcon,
@@ -14,6 +15,7 @@ import { useSettings } from "../lib/settings.jsx";
 const NAV = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/keys", label: "API Keys", icon: KeyRound },
+  { to: "/models", label: "Models", icon: Boxes },
   { to: "/playground", label: "Playground", icon: TerminalSquare },
   { to: "/usage", label: "Usage", icon: BarChart3 },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
@@ -22,6 +24,7 @@ const NAV = [
 const TITLES = {
   "/": "Overview",
   "/keys": "API Keys",
+  "/models": "Model Registry",
   "/playground": "Playground",
   "/usage": "Usage & Metrics",
   "/settings": "Settings",
