@@ -65,6 +65,8 @@ export function createApi({ baseUrl = "", adminToken = "" } = {}) {
       request(`${baseUrl}/admin/usage/recent?limit=${limit}`, { headers: admin() }),
     usageTimeseries: (days = 14) =>
       request(`${baseUrl}/admin/usage/timeseries?days=${days}`, { headers: admin() }),
+    audit: (limit = 50) =>
+      request(`${baseUrl}/admin/audit?limit=${limit}`, { headers: admin() }),
 
     // Admin — model registry
     listModelConfigs: () => request(`${baseUrl}/admin/models`, { headers: admin() }),

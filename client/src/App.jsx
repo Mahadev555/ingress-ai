@@ -5,6 +5,7 @@ import Keys from "./pages/Keys.jsx";
 import Models from "./pages/Models.jsx";
 import Playground from "./pages/Playground.jsx";
 import Usage from "./pages/Usage.jsx";
+import Audit from "./pages/Audit.jsx";
 import Settings from "./pages/Settings.jsx";
 
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="models" element={<Models />} />
         <Route path="playground" element={<Playground />} />
         <Route path="usage" element={<Usage />} />
+        <Route path="audit" element={<Audit />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>

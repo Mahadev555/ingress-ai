@@ -4,6 +4,7 @@ import {
   Boxes,
   KeyRound,
   LayoutDashboard,
+  ScrollText,
   Settings as SettingsIcon,
   TerminalSquare,
 } from "lucide-react";
@@ -18,6 +19,7 @@ const NAV = [
   { to: "/models", label: "Models", icon: Boxes },
   { to: "/playground", label: "Playground", icon: TerminalSquare },
   { to: "/usage", label: "Usage", icon: BarChart3 },
+  { to: "/audit", label: "Audit", icon: ScrollText },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
@@ -27,6 +29,7 @@ const TITLES = {
   "/models": "Model Registry",
   "/playground": "Playground",
   "/usage": "Usage & Metrics",
+  "/audit": "Audit Logs",
   "/settings": "Settings",
 };
 
