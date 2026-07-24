@@ -25,6 +25,17 @@ def _chat(client, model="gpt-4o-mini"):
     )
 
 
+def _new_credential(client, api_key="k", provider="openai", name=None):
+    """Create a provider credential (where the key lives) and return its id."""
+    r = client.post(
+        "/admin/providers",
+        headers=ADMIN,
+        json={"name": name or f"{provider}-{api_key}", "provider": provider, "api_key": api_key},
+    )
+    assert r.status_code == 200, r.text
+    return r.json()["id"]
+
+
 def _deployment(**over):
     base = dict(id=1, model_name="m", provider="openai", api_key="k", base_url=None, weight=1, enabled=True)
     base.update(over)
@@ -54,8 +65,8 @@ def test_registry_falls_back_to_env_when_empty():
     assert reg.has("gpt-4o-mini") is False  # no deployments → env credential path
 
 
-def test_deployment_key_overrides_env(make_gateway):
-    """A deployment supplies its own upstream key, not the env default."""
+def test_deployment_uses_its_credential_key(make_gateway):
+    """A deployment routes through its credential's key, not the env default."""
     seen = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -63,15 +74,14 @@ def test_deployment_key_overrides_env(make_gateway):
         return httpx.Response(200, json=CHAT_OK)
 
     with make_gateway(handler) as client:
+        cid = _new_credential(client, api_key="dep-secret-key", name="openai-dep")
         created = client.post(
             "/admin/deployments",
             headers=ADMIN,
-            json={"model_name": "gpt-4o-mini", "provider": "openai", "api_key": "dep-secret-key"},
+            json={"model_name": "gpt-4o-mini", "credential_id": cid},
         )
         assert created.status_code == 200, created.text
-        assert created.json()["has_api_key"] is True
         assert "dep-secret-key" not in created.text  # secret never returned
-
         assert _chat(client).status_code == 200
 
     assert seen["auth"] == "Bearer dep-secret-key"
@@ -91,22 +101,24 @@ def test_env_models_are_seeded_into_db(make_gateway):
 
 def test_deployment_requires_registered_model(make_gateway):
     with make_gateway() as client:
+        cid = _new_credential(client)
         r = client.post(
             "/admin/deployments",
             headers=ADMIN,
-            json={"model_name": "no-such-model", "provider": "openai", "api_key": "k"},
+            json={"model_name": "no-such-model", "credential_id": cid},
         )
     assert r.status_code == 400  # must point at a registered model
 
 
 def test_cannot_delete_model_with_deployments(make_gateway):
     with make_gateway() as client:
+        cid = _new_credential(client)
         models = client.get("/admin/models", headers=ADMIN).json()
         mini = next(m for m in models if m["name"] == "gpt-4o-mini")
         client.post(
             "/admin/deployments",
             headers=ADMIN,
-            json={"model_name": "gpt-4o-mini", "provider": "openai", "api_key": "k"},
+            json={"model_name": "gpt-4o-mini", "credential_id": cid},
         )
         blocked = client.delete(f"/admin/models/{mini['id']}", headers=ADMIN)
         # The model now reports its backing deployment count.
@@ -115,8 +127,8 @@ def test_cannot_delete_model_with_deployments(make_gateway):
     assert next(m for m in refreshed if m["name"] == "gpt-4o-mini")["deployment_count"] == 1
 
 
-def test_failover_across_deployment_keys(make_gateway):
-    """One deployment's key fails; the request fails over to the other key."""
+def test_failover_across_credential_keys(make_gateway):
+    """One credential's key fails; the request fails over to the other."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         if "bad-key" in request.headers.get("authorization", ""):
@@ -125,10 +137,11 @@ def test_failover_across_deployment_keys(make_gateway):
 
     with make_gateway(handler) as client:
         for api_key in ("bad-key", "good-key"):
+            cid = _new_credential(client, api_key=api_key, name=f"openai-{api_key}")
             r = client.post(
                 "/admin/deployments",
                 headers=ADMIN,
-                json={"model_name": "gpt-4o-mini", "provider": "openai", "api_key": api_key},
+                json={"model_name": "gpt-4o-mini", "credential_id": cid},
             )
             assert r.status_code == 200
         # Regardless of shuffle order, a failing key fails over to the healthy one.

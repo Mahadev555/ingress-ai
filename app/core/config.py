@@ -93,6 +93,10 @@ class Settings(BaseSettings):
     guardrails_enabled: bool = False  # simple prompt-injection screening
     admin_read_tokens: str = ""  # comma-separated read-only admin tokens
 
+    # Passphrase used to encrypt provider credential keys at rest (any string).
+    # Empty = store plaintext (fine for local dev; set this in production).
+    credential_encryption_key: str = ""
+
     def model_list(self) -> list[str]:
         """Parse the comma-separated `available_models` into a clean list."""
         return [m.strip() for m in self.available_models.split(",") if m.strip()]

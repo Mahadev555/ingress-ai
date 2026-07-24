@@ -35,6 +35,11 @@ def _additive_columns(dialect: str) -> dict[str, dict[str, str]]:
         "audit_logs": {
             "conversation_id": "VARCHAR(64)",
         },
+        # Deployments moved from carrying their own key to referencing a
+        # provider credential (provider_credentials is a new table via create_all).
+        "model_deployments": {
+            "credential_id": "INTEGER",
+        },
     }
 
 

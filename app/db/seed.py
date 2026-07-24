@@ -15,10 +15,50 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
-from app.db.models import ModelConfig
+from app.core.secrets import encrypt
+from app.db.models import ModelConfig, ProviderCredential
 from app.providers.registry import provider_for_model
 
 logger = logging.getLogger("ingress.seed")
+
+# Providers whose env key seeds a named credential on first run.
+_ENV_PROVIDERS = [
+    ("openai", lambda s: s.openai_api_key),
+    ("anthropic", lambda s: s.anthropic_api_key),
+    ("gemini", lambda s: s.gemini_api_key),
+    ("azure", lambda s: s.azure_api_key),
+]
+
+
+async def seed_credentials_if_empty(
+    session_factory: async_sessionmaker[AsyncSession], settings: Settings
+) -> list[str]:
+    """Import each configured env provider key as a named, encrypted credential
+    (e.g. 'openai-env'), but only if no credentials exist yet. This makes env
+    keys manageable in the UI and gives deployments something to reference."""
+    async with session_factory() as session:
+        count = (await session.execute(select(func.count(ProviderCredential.id)))).scalar_one()
+        if count:
+            return []
+
+        seeded: list[str] = []
+        for provider, get_key in _ENV_PROVIDERS:
+            key = get_key(settings)
+            if not key:
+                continue
+            session.add(
+                ProviderCredential(
+                    name=f"{provider}-env",
+                    provider=provider,
+                    api_key=encrypt(key),
+                )
+            )
+            seeded.append(provider)
+        await session.commit()
+
+    if seeded:
+        logger.info("seeded %d provider credential(s) from env keys", len(seeded))
+    return seeded
 
 
 async def seed_models_if_empty(

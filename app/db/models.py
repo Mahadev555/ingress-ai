@@ -94,21 +94,39 @@ class ModelConfig(Base):
     )
 
 
+class ProviderCredential(Base):
+    """A named upstream credential for a provider: the API key (and optional
+    endpoint) used to actually call it. Keys live here — not on models (a model
+    has no key) and not repeated on every deployment. One provider can have many
+    credentials (different accounts/regions); the key is encrypted at rest and
+    never returned by the API."""
+
+    __tablename__ = "provider_credentials"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    # Stored encrypted when CREDENTIAL_ENCRYPTION_KEY is set (see core.secrets).
+    api_key: Mapped[str] = mapped_column(String(512), default="")
+    base_url: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class ModelDeployment(Base):
-    """One concrete backend for a public model name. A model can have many
-    deployments (different provider keys, regions, or base URLs); the router
-    load-balances across the healthy ones. This is what lets the gateway spread
-    load over several keys/regions instead of routing to a single upstream."""
+    """One concrete backend for a public model name: this model reached via a
+    specific provider credential. A model can have many deployments (different
+    credentials/regions); the router load-balances across the healthy ones. The
+    key itself lives on the credential, so it's set once and rotated in one place."""
 
     __tablename__ = "model_deployments"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     # The public model name clients request (e.g. "gpt-4o-mini").
     model_name: Mapped[str] = mapped_column(String(128), index=True)
-    provider: Mapped[str] = mapped_column(String(32))
-    # Upstream credential + optional endpoint override; server-side only.
-    api_key: Mapped[str] = mapped_column(String(256), default="")
-    base_url: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    # The provider credential this deployment routes through.
+    credential_id: Mapped[int] = mapped_column(Integer, index=True)
     # Relative weight for the weighted-shuffle strategy.
     weight: Mapped[int] = mapped_column(Integer, default=1)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)

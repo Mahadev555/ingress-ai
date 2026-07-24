@@ -20,7 +20,8 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import ModelDeployment
+from app.core.secrets import decrypt
+from app.db.models import ModelDeployment, ProviderCredential
 
 STRATEGIES = {"simple-shuffle", "least-busy", "latency"}
 
@@ -50,21 +51,28 @@ class DeploymentRegistry:
 
     async def reload(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         async with session_factory() as session:
-            rows = (await session.execute(select(ModelDeployment))).scalars().all()
-        self.set(
-            [
+            creds = {
+                c.id: c
+                for c in (await session.execute(select(ProviderCredential))).scalars().all()
+            }
+            deployments = (await session.execute(select(ModelDeployment))).scalars().all()
+        resolved: list[Deployment] = []
+        for r in deployments:
+            cred = creds.get(r.credential_id)
+            if cred is None:
+                continue  # orphaned (credential deleted) — not routable
+            resolved.append(
                 Deployment(
                     id=r.id,
                     model_name=r.model_name,
-                    provider=r.provider,
-                    api_key=r.api_key,
-                    base_url=r.base_url,
+                    provider=cred.provider,
+                    api_key=decrypt(cred.api_key),  # decrypt only in-process
+                    base_url=cred.base_url,
                     weight=max(1, r.weight or 1),
                     enabled=r.enabled,
                 )
-                for r in rows
-            ]
-        )
+            )
+        self.set(resolved)
 
     def set(self, deployments: list[Deployment]) -> None:
         by_model: dict[str, list[Deployment]] = {}

@@ -8,10 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_admin, require_admin_read
 from app.core.auth import generate_key
+from app.core.secrets import encrypt
 from app.db.models import (
     AuditLog,
     ModelConfig,
     ModelDeployment,
+    ProviderCredential,
     Team,
     UsageRecord,
     VirtualKey,
@@ -564,45 +566,38 @@ async def delete_model_config(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-# --- model deployments (load balancing) --------------------------------------
+# --- provider credentials (where keys live) ----------------------------------
 
 
-class DeploymentRequest(BaseModel):
-    model_name: str
+class ProviderCredentialRequest(BaseModel):
+    name: str
     provider: str
     api_key: str = ""
     base_url: Optional[str] = None
-    weight: int = 1
-    enabled: bool = True
 
 
-class DeploymentUpdate(BaseModel):
+class ProviderCredentialUpdate(BaseModel):
+    name: Optional[str] = None
     provider: Optional[str] = None
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None  # send a new key to rotate; omit to keep
     base_url: Optional[str] = None
-    weight: Optional[int] = None
-    enabled: Optional[bool] = None
 
 
-class DeploymentInfo(BaseModel):
+class ProviderCredentialInfo(BaseModel):
     id: int
-    model_name: str
+    name: str
     provider: str
-    has_api_key: bool  # the secret itself is never returned
+    has_api_key: bool  # the key itself is never returned
     base_url: Optional[str]
-    weight: int
-    enabled: bool
 
 
-def _deployment_info(d: ModelDeployment) -> DeploymentInfo:
-    return DeploymentInfo(
-        id=d.id,
-        model_name=d.model_name,
-        provider=d.provider,
-        has_api_key=bool(d.api_key),
-        base_url=d.base_url,
-        weight=d.weight,
-        enabled=d.enabled,
+def _credential_info(c: ProviderCredential) -> ProviderCredentialInfo:
+    return ProviderCredentialInfo(
+        id=c.id,
+        name=c.name,
+        provider=c.provider,
+        has_api_key=bool(c.api_key),
+        base_url=c.base_url,
     )
 
 
@@ -610,20 +605,125 @@ async def _reload_deployments(request: Request) -> None:
     await request.app.state.deployment_registry.reload(request.app.state.session_factory)
 
 
-@router.get("/deployments", response_model=list[DeploymentInfo])
-async def list_deployments(session: AsyncSession = Depends(get_session)) -> list[DeploymentInfo]:
-    rows = (
+@router.get("/providers", response_model=list[ProviderCredentialInfo])
+async def list_credentials(session: AsyncSession = Depends(get_session)):
+    rows = (await session.execute(select(ProviderCredential).order_by(ProviderCredential.name))).scalars()
+    return [_credential_info(c) for c in rows]
+
+
+@router.post("/providers", response_model=ProviderCredentialInfo, dependencies=_WRITE)
+async def create_credential(
+    body: ProviderCredentialRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> ProviderCredentialInfo:
+    exists = (
+        await session.execute(select(ProviderCredential).where(ProviderCredential.name == body.name))
+    ).scalar_one_or_none()
+    if exists is not None:
+        raise HTTPException(status_code=409, detail="a credential with that name already exists")
+    credential = ProviderCredential(
+        name=body.name,
+        provider=body.provider,
+        api_key=encrypt(body.api_key),  # encrypted at rest
+        base_url=body.base_url,
+    )
+    session.add(credential)
+    await session.commit()
+    await session.refresh(credential)
+    return _credential_info(credential)
+
+
+@router.patch("/providers/{credential_id}", response_model=ProviderCredentialInfo, dependencies=_WRITE)
+async def update_credential(
+    credential_id: int,
+    body: ProviderCredentialUpdate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> ProviderCredentialInfo:
+    credential = await session.get(ProviderCredential, credential_id)
+    if credential is None:
+        raise HTTPException(status_code=404, detail="credential not found")
+    fields = body.model_dump(exclude_unset=True)
+    if "api_key" in fields:
+        # A new key rotates it; encrypt before storing. (Blank means "clear".)
+        credential.api_key = encrypt(fields.pop("api_key") or "")
+    for field_name, value in fields.items():
+        setattr(credential, field_name, value)
+    await session.commit()
+    await session.refresh(credential)
+    await _reload_deployments(request)  # a rotated key changes routing
+    return _credential_info(credential)
+
+
+@router.delete("/providers/{credential_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=_WRITE)
+async def delete_credential(
+    credential_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    credential = await session.get(ProviderCredential, credential_id)
+    if credential is None:
+        raise HTTPException(status_code=404, detail="credential not found")
+    in_use = (
         await session.execute(
-            select(ModelDeployment).order_by(ModelDeployment.model_name, ModelDeployment.id)
+            select(func.count(ModelDeployment.id)).where(
+                ModelDeployment.credential_id == credential_id
+            )
         )
-    ).scalars()
-    return [_deployment_info(d) for d in rows]
+    ).scalar_one()
+    if in_use:
+        raise HTTPException(
+            status_code=409,
+            detail=f"credential '{credential.name}' is used by {in_use} deployment(s); delete those first",
+        )
+    await session.delete(credential)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- model deployments (load balancing) --------------------------------------
+
+
+class DeploymentRequest(BaseModel):
+    model_name: str
+    credential_id: int
+    weight: int = 1
+    enabled: bool = True
+
+
+class DeploymentUpdate(BaseModel):
+    credential_id: Optional[int] = None
+    weight: Optional[int] = None
+    enabled: Optional[bool] = None
+
+
+class DeploymentInfo(BaseModel):
+    id: int
+    model_name: str
+    credential_id: int
+    credential_name: str  # resolved for display
+    provider: str  # inherited from the credential
+    weight: int
+    enabled: bool
+
+
+def _deployment_info(d: ModelDeployment, cred: Optional[ProviderCredential]) -> DeploymentInfo:
+    return DeploymentInfo(
+        id=d.id,
+        model_name=d.model_name,
+        credential_id=d.credential_id,
+        credential_name=cred.name if cred else "(deleted)",
+        provider=cred.provider if cred else "—",
+        weight=d.weight,
+        enabled=d.enabled,
+    )
 
 
 async def _require_routable_model(session: AsyncSession, name: str) -> ModelConfig:
     """A deployment must point at a registered, non-alias model — that's the
-    link between the two tables. Reject unknown names and aliases (a request for
-    an alias resolves to its target first, so a deployment there is never hit)."""
+    link to the model table. Reject unknown names and aliases (a request for an
+    alias resolves to its target first, so a deployment there is never hit)."""
     model = (
         await session.execute(select(ModelConfig).where(ModelConfig.name == name))
     ).scalar_one_or_none()
@@ -640,6 +740,26 @@ async def _require_routable_model(session: AsyncSession, name: str) -> ModelConf
     return model
 
 
+async def _require_credential(session: AsyncSession, credential_id: int) -> ProviderCredential:
+    credential = await session.get(ProviderCredential, credential_id)
+    if credential is None:
+        raise HTTPException(status_code=400, detail="credential not found — create it on the Providers page")
+    return credential
+
+
+@router.get("/deployments", response_model=list[DeploymentInfo])
+async def list_deployments(session: AsyncSession = Depends(get_session)) -> list[DeploymentInfo]:
+    rows = (
+        await session.execute(
+            select(ModelDeployment).order_by(ModelDeployment.model_name, ModelDeployment.id)
+        )
+    ).scalars().all()
+    creds = {
+        c.id: c for c in (await session.execute(select(ProviderCredential))).scalars().all()
+    }
+    return [_deployment_info(d, creds.get(d.credential_id)) for d in rows]
+
+
 @router.post("/deployments", response_model=DeploymentInfo, dependencies=_WRITE)
 async def create_deployment(
     body: DeploymentRequest,
@@ -647,12 +767,13 @@ async def create_deployment(
     session: AsyncSession = Depends(get_session),
 ) -> DeploymentInfo:
     await _require_routable_model(session, body.model_name)
+    cred = await _require_credential(session, body.credential_id)
     deployment = ModelDeployment(**body.model_dump())
     session.add(deployment)
     await session.commit()
     await session.refresh(deployment)
     await _reload_deployments(request)
-    return _deployment_info(deployment)
+    return _deployment_info(deployment, cred)
 
 
 @router.patch("/deployments/{deployment_id}", response_model=DeploymentInfo, dependencies=_WRITE)
@@ -665,12 +786,16 @@ async def update_deployment(
     deployment = await session.get(ModelDeployment, deployment_id)
     if deployment is None:
         raise HTTPException(status_code=404, detail="deployment not found")
-    for field_name, value in body.model_dump(exclude_unset=True).items():
+    fields = body.model_dump(exclude_unset=True)
+    if fields.get("credential_id") is not None:
+        await _require_credential(session, fields["credential_id"])
+    for field_name, value in fields.items():
         setattr(deployment, field_name, value)
     await session.commit()
     await session.refresh(deployment)
     await _reload_deployments(request)
-    return _deployment_info(deployment)
+    cred = await session.get(ProviderCredential, deployment.credential_id)
+    return _deployment_info(deployment, cred)
 
 
 @router.delete(
