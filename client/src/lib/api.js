@@ -66,6 +66,8 @@ export function createApi({ baseUrl = "", adminToken = "" } = {}) {
       request(`${baseUrl}/admin/usage/recent?limit=${limit}`, { headers: admin() }),
     usageTimeseries: (days = 14) =>
       request(`${baseUrl}/admin/usage/timeseries?days=${days}`, { headers: admin() }),
+    usageByTag: (days = 0) =>
+      request(`${baseUrl}/admin/usage/by-tag${days ? `?days=${days}` : ""}`, { headers: admin() }),
     audit: (limit = 50) =>
       request(`${baseUrl}/admin/audit?limit=${limit}`, { headers: admin() }),
 
@@ -77,6 +79,25 @@ export function createApi({ baseUrl = "", adminToken = "" } = {}) {
       request(`${baseUrl}/admin/models/${id}`, { method: "PATCH", body, headers: admin() }),
     deleteModelConfig: (id) =>
       request(`${baseUrl}/admin/models/${id}`, { method: "DELETE", headers: admin() }),
+
+    // Admin — model deployments (load balancing)
+    listDeployments: () => request(`${baseUrl}/admin/deployments`, { headers: admin() }),
+    createDeployment: (body) =>
+      request(`${baseUrl}/admin/deployments`, { method: "POST", body, headers: admin() }),
+    updateDeployment: (id, body) =>
+      request(`${baseUrl}/admin/deployments/${id}`, { method: "PATCH", body, headers: admin() }),
+    deleteDeployment: (id) =>
+      request(`${baseUrl}/admin/deployments/${id}`, { method: "DELETE", headers: admin() }),
+
+    // Admin — teams (tenancy)
+    listTeams: () => request(`${baseUrl}/admin/teams`, { headers: admin() }),
+    createTeam: (body) =>
+      request(`${baseUrl}/admin/teams`, { method: "POST", body, headers: admin() }),
+    updateTeam: (id, body) =>
+      request(`${baseUrl}/admin/teams/${id}`, { method: "PATCH", body, headers: admin() }),
+    deleteTeam: (id) =>
+      request(`${baseUrl}/admin/teams/${id}`, { method: "DELETE", headers: admin() }),
+    teamUsage: (id) => request(`${baseUrl}/admin/teams/${id}/usage`, { headers: admin() }),
 
     // Chat (playground) — non-streaming
     chat: (apiKey, body, conversationId) =>

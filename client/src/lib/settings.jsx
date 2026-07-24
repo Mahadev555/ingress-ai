@@ -22,6 +22,20 @@ export function SettingsProvider({ children }) {
     [apiBase, adminToken]
   );
 
+  // Whether the gateway tracks dollar cost (COST_TRACKING_ENABLED). Drives
+  // whether the dashboard shows cost columns/estimates. Assume on until told.
+  const [costTracking, setCostTracking] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    api
+      .config()
+      .then((c) => alive && c && setCostTracking(c.cost_tracking_enabled !== false))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [api]);
+
   const value = {
     apiBase,
     setApiBase,
@@ -31,6 +45,7 @@ export function SettingsProvider({ children }) {
     setVirtualKey,
     api,
     hasAdmin: Boolean(adminToken),
+    costTracking,
   };
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

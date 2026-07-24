@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Boxes, Pencil, Plus, Trash2 } from "lucide-react";
 import { useSettings } from "../lib/settings.jsx";
 import { useAsync } from "../lib/useAsync.js";
@@ -211,6 +212,7 @@ export default function Models() {
                 <th className="px-5 py-3 font-semibold">Alias</th>
                 <th className="px-5 py-3 text-right font-semibold">Price /1M (in / out)</th>
                 <th className="px-5 py-3 font-semibold">Defaults</th>
+                <th className="px-5 py-3 font-semibold">Backends</th>
                 <th className="px-5 py-3 font-semibold">Status</th>
                 <th className="px-5 py-3" />
               </tr>
@@ -229,6 +231,19 @@ export default function Models() {
                   <td className="px-5 py-3 text-xs text-slate-500">
                     {m.default_rate_limit_per_minute ? `${m.default_rate_limit_per_minute}/min` : "—"}
                     {m.default_tpm_limit ? ` · ${m.default_tpm_limit} tpm` : ""}
+                  </td>
+                  <td className="px-5 py-3">
+                    {m.alias_of ? (
+                      <span className="text-xs text-slate-400">via {m.alias_of}</span>
+                    ) : m.deployment_count > 0 ? (
+                      <Link to="/deployments" title="Load-balanced backends">
+                        <Badge tone="violet">
+                          {m.deployment_count} deployment{m.deployment_count > 1 ? "s" : ""}
+                        </Badge>
+                      </Link>
+                    ) : (
+                      <span className="text-xs text-slate-400">env key</span>
+                    )}
                   </td>
                   <td className="px-5 py-3">
                     {m.enabled ? <Badge tone="green">enabled</Badge> : <Badge tone="slate">disabled</Badge>}

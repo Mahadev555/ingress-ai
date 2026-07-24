@@ -56,7 +56,7 @@ function Stat({ icon: Icon, label, value }) {
 }
 
 export default function Overview() {
-  const { api, hasAdmin } = useSettings();
+  const { api, hasAdmin, costTracking } = useSettings();
 
   const usage = useAsync(() => api.usage(), [api], { enabled: hasAdmin });
   const keys = useAsync(() => api.listKeys(), [api], { enabled: hasAdmin });
@@ -88,10 +88,12 @@ export default function Overview() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className={`grid grid-cols-2 gap-4 ${costTracking ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
         <Stat icon={Activity} label="Requests" value={fmt(u.total_requests)} />
         <Stat icon={Cpu} label="Tokens" value={fmt(u.total_tokens)} />
-        <Stat icon={Coins} label="Est. cost" value={`$${(u.total_cost_usd ?? 0).toFixed(4)}`} />
+        {costTracking && (
+          <Stat icon={Coins} label="Est. cost" value={`$${(u.total_cost_usd ?? 0).toFixed(4)}`} />
+        )}
         <Stat icon={KeyRound} label="Active keys" value={fmt(activeKeys)} />
       </div>
 

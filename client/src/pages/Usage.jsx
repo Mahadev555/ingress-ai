@@ -9,6 +9,7 @@ import {
   KeyRound,
   Layers,
   RefreshCw,
+  Tags,
 } from "lucide-react";
 import { useSettings } from "../lib/settings.jsx";
 import { useAsync } from "../lib/useAsync.js";
@@ -67,17 +68,19 @@ function BudgetCell({ used, budget }) {
   );
 }
 
-const TOKEN_HEADERS = (
-  <>
-    <th className="px-5 py-3 text-right font-semibold">Requests</th>
-    <th className="px-5 py-3 text-right font-semibold">Input</th>
-    <th className="px-5 py-3 text-right font-semibold">Output</th>
-    <th className="px-5 py-3 text-right font-semibold">Total</th>
-    <th className="px-5 py-3 text-right font-semibold">Cost</th>
-  </>
-);
+function TokenHeaders({ showCost }) {
+  return (
+    <>
+      <th className="px-5 py-3 text-right font-semibold">Requests</th>
+      <th className="px-5 py-3 text-right font-semibold">Input</th>
+      <th className="px-5 py-3 text-right font-semibold">Output</th>
+      <th className="px-5 py-3 text-right font-semibold">Total</th>
+      {showCost && <th className="px-5 py-3 text-right font-semibold">Cost</th>}
+    </>
+  );
+}
 
-function TokenCells({ row }) {
+function TokenCells({ row, showCost }) {
   return (
     <>
       <td className="px-5 py-3 text-right tabular-nums text-slate-700">{fmt(row.requests)}</td>
@@ -86,7 +89,9 @@ function TokenCells({ row }) {
       <td className="px-5 py-3 text-right tabular-nums font-semibold text-slate-900">
         {fmt(row.total_tokens)}
       </td>
-      <td className="px-5 py-3 text-right tabular-nums text-slate-700">${row.cost_usd.toFixed(4)}</td>
+      {showCost && (
+        <td className="px-5 py-3 text-right tabular-nums text-slate-700">${row.cost_usd.toFixed(4)}</td>
+      )}
     </>
   );
 }
@@ -125,13 +130,14 @@ const RANGES = [
 ];
 
 export default function Usage() {
-  const { api, hasAdmin } = useSettings();
+  const { api, hasAdmin, costTracking } = useSettings();
   const [summaryDays, setSummaryDays] = useState(30);
   const [days, setDays] = useState(7);
   const [selectedModels, setSelectedModels] = useState([]); // [] = all models
   const usage = useAsync(() => api.usage(summaryDays), [api, summaryDays], { enabled: hasAdmin });
   const byKey = useAsync(() => api.usageByKey(), [api], { enabled: hasAdmin });
   const byModel = useAsync(() => api.usageByModel(), [api], { enabled: hasAdmin });
+  const byTag = useAsync(() => api.usageByTag(summaryDays), [api, summaryDays], { enabled: hasAdmin });
   const series = useAsync(() => api.usageTimeseries(days), [api, days], { enabled: hasAdmin });
   const [metrics, setMetrics] = useState(null);
   const [loadingMetrics, setLoadingMetrics] = useState(false);
@@ -185,12 +191,14 @@ export default function Usage() {
       ) : usage.error ? (
         <ErrorState error={usage.error} onRetry={usage.reload} />
       ) : (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+        <div className={cx("grid grid-cols-2 gap-4", costTracking ? "lg:grid-cols-5" : "lg:grid-cols-4")}>
           <Stat icon={Activity} label="Requests" value={fmt(u.total_requests)} />
           <Stat icon={ArrowDownToLine} label="Input" value={fmt(u.prompt_tokens)} />
           <Stat icon={ArrowUpFromLine} label="Output" value={fmt(u.completion_tokens)} />
           <Stat icon={Cpu} label="Total tokens" value={fmt(u.total_tokens)} />
-          <Stat icon={Coins} label="Est. cost" value={`$${(u.total_cost_usd ?? 0).toFixed(4)}`} />
+          {costTracking && (
+            <Stat icon={Coins} label="Est. cost" value={`$${(u.total_cost_usd ?? 0).toFixed(4)}`} />
+          )}
         </div>
       )}
 
@@ -251,7 +259,7 @@ export default function Usage() {
                 <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-400">
                   <th className="px-5 py-3 font-semibold">Key</th>
                   <th className="px-5 py-3 font-semibold">Name</th>
-                  {TOKEN_HEADERS}
+                  <TokenHeaders showCost={costTracking} />
                   <th className="px-5 py-3 font-semibold">Budget</th>
                 </tr>
               </thead>
@@ -264,7 +272,7 @@ export default function Usage() {
                       </code>
                     </td>
                     <td className="px-5 py-3 font-medium text-slate-800">{k.name || "—"}</td>
-                    <TokenCells row={k} />
+                    <TokenCells row={k} showCost={costTracking} />
                     <td className="px-5 py-3">
                       <BudgetCell used={k.total_tokens} budget={k.token_budget} />
                     </td>
@@ -299,7 +307,7 @@ export default function Usage() {
                 <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-400">
                   <th className="px-5 py-3 font-semibold">Model</th>
                   <th className="px-5 py-3 font-semibold">Provider</th>
-                  {TOKEN_HEADERS}
+                  <TokenHeaders showCost={costTracking} />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -309,7 +317,59 @@ export default function Usage() {
                     <td className="px-5 py-3">
                       <Badge tone="brand">{m.provider}</Badge>
                     </td>
-                    <TokenCells row={m} />
+                    <TokenCells row={m} showCost={costTracking} />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <CardHeader
+          title={costTracking ? "Spend by tag" : "Usage by tag"}
+          subtitle="Attribution across key tags and per-request X-Tags. A request counts toward every tag it carries."
+          action={
+            <Button variant="ghost" onClick={byTag.reload}>
+              <RefreshCw size={14} /> Refresh
+            </Button>
+          }
+        />
+        {byTag.loading ? (
+          <Spinner />
+        ) : byTag.error ? (
+          <ErrorState error={byTag.error} onRetry={byTag.reload} />
+        ) : byTag.data.length === 0 ? (
+          <EmptyState
+            icon={Tags}
+            title="No tagged usage"
+            description="Give keys default tags, or send an X-Tags header, to attribute spend here."
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-400">
+                  <th className="px-5 py-3 font-semibold">Tag</th>
+                  <th className="px-5 py-3 text-right font-semibold">Requests</th>
+                  <th className="px-5 py-3 text-right font-semibold">Total tokens</th>
+                  {costTracking && <th className="px-5 py-3 text-right font-semibold">Cost</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {byTag.data.map((t) => (
+                  <tr key={t.tag} className="hover:bg-slate-50/60">
+                    <td className="px-5 py-3"><Badge tone="violet">#{t.tag}</Badge></td>
+                    <td className="px-5 py-3 text-right tabular-nums text-slate-700">{fmt(t.requests)}</td>
+                    <td className="px-5 py-3 text-right tabular-nums font-semibold text-slate-900">
+                      {fmt(t.total_tokens)}
+                    </td>
+                    {costTracking && (
+                      <td className="px-5 py-3 text-right tabular-nums text-slate-700">
+                        ${t.cost_usd.toFixed(4)}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
