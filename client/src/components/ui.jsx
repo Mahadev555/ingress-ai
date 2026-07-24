@@ -73,6 +73,7 @@ const BADGE_TONES = {
   slate: "bg-slate-100 text-slate-600 ring-slate-500/20",
   brand: "bg-brand-50 text-brand-700 ring-brand-600/20",
   amber: "bg-amber-50 text-amber-700 ring-amber-600/20",
+  violet: "bg-violet-50 text-violet-700 ring-violet-600/20",
 };
 
 export function Badge({ tone = "slate", children, className = "" }) {

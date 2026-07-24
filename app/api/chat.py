@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.core.guardrails import screen_text
 from app.core.ratelimit import bucket_name, bucket_params
 from app.db.session import get_session
+from app.observability.alerts import check_key_budget
 from app.observability.metrics import observe
 from app.observability.pricing import cost_usd
 from app.observability.usage import record_usage, touch_last_used, write_audit
@@ -77,6 +78,24 @@ def _message_text(message) -> str:
     return f"{message.role}: {_content_text(message.content)}"
 
 
+def _maybe_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """Estimated USD cost, or 0.0 when cost tracking is turned off."""
+    if not get_settings().cost_tracking_enabled:
+        return 0.0
+    return cost_usd(model, prompt_tokens, completion_tokens)
+
+
+def _merge_tags(key_tags, header: Optional[str]) -> list[str]:
+    """Key's default tags plus any per-request tags from the X-Tags header."""
+    tags = list(key_tags or [])
+    if header:
+        for raw in header.split(","):
+            tag = raw.strip()
+            if tag and tag not in tags:
+                tags.append(tag)
+    return tags
+
+
 def _latest_user_prompt(messages) -> str:
     """The most recent user message only — clients resend the whole history on
     every turn, so auditing that would duplicate prior turns. One pair per entry."""
@@ -123,7 +142,7 @@ def _sniff_usage(chunk: bytes, usage_holder: dict) -> None:
 
 async def _record_stream_usage(
     session_factory, key, provider, model, usage_holder, started,
-    trace_id=None, audit=False, prompt="", conversation_id=None,
+    trace_id=None, audit=False, prompt="", conversation_id=None, tags=None,
 ):
     """Record a streamed request's usage (and audit its content) once the
     stream has drained — the assistant text was accumulated as it flowed."""
@@ -135,11 +154,12 @@ async def _record_stream_usage(
         prompt_tokens=usage_holder["prompt_tokens"],
         completion_tokens=usage_holder["completion_tokens"],
         total_tokens=usage_holder["total_tokens"],
-        cost_usd=cost_usd(model, usage_holder["prompt_tokens"], usage_holder["completion_tokens"]),
+        cost_usd=_maybe_cost(model, usage_holder["prompt_tokens"], usage_holder["completion_tokens"]),
         latency_ms=int((time.perf_counter() - started) * 1000),
         status=200,
         cache_hit=False,
         trace_id=trace_id,
+        tags=tags or [],
     )
     observe(event)
     await record_usage(session_factory, event)
@@ -185,9 +205,15 @@ async def list_models(
 
 @router.get("/config")
 async def client_config() -> dict:
-    """Public client-facing config (e.g. the playground's conversation limit)."""
+    """Public client-facing config (e.g. the playground's conversation limit and
+    whether cost tracking is on, which the dashboard uses to show/hide cost)."""
     settings = get_settings()
-    return {"max_conversation_turns": settings.max_conversation_turns}
+    return {
+        "max_conversation_turns": settings.max_conversation_turns,
+        "cost_tracking_enabled": settings.cost_tracking_enabled,
+        # Providers the gateway has an adapter for (the full supported palette).
+        "providers": sorted(ADAPTERS.keys()),
+    }
 
 
 @router.post("/chat/completions")
@@ -198,6 +224,7 @@ async def create_chat_completion(
     key: KeyContext = Depends(require_key),
     session: AsyncSession = Depends(get_session),
     x_conversation_id: Optional[str] = Header(default=None),
+    x_tags: Optional[str] = Header(default=None),
 ) -> Any:
     if not key.allows_model(payload.model):
         raise HTTPException(
@@ -215,6 +242,17 @@ async def create_chat_completion(
 
     settings = get_settings()
     started = time.perf_counter()
+    tags = _merge_tags(key.tags, x_tags)
+
+    # Fire a budget alert (soft/hard) off the hot path when configured.
+    if settings.alert_webhook_url:
+        background.add_task(
+            check_key_budget,
+            request.app.state.http_client,
+            settings.alert_webhook_url,
+            settings.alert_soft_threshold,
+            key,
+        )
 
     # Resolve a registry alias to its target model, then read that model's
     # default limits (a key's own limit still wins over the model default).
@@ -273,7 +311,11 @@ async def create_chat_completion(
 
     try:
         client: httpx.AsyncClient = request.app.state.http_client
-        candidates = build_candidates(payload.model, payload.fallbacks or [], settings)
+        deployments = request.app.state.deployment_registry
+        candidates = build_candidates(
+            payload.model, payload.fallbacks or [], settings,
+            deployments=deployments, strategy=settings.routing_strategy,
+        )
 
         # Drop providers with no API key configured — a clean error beats a
         # cryptic "illegal header" from an empty Bearer token. Fallbacks still work.
@@ -325,6 +367,7 @@ async def create_chat_completion(
                 audit=settings.audit_capture_content,
                 prompt=_latest_user_prompt(payload.messages),
                 conversation_id=x_conversation_id,
+                tags=tags,
             )
             handed_off = True
             return StreamingResponse(
@@ -341,7 +384,7 @@ async def create_chat_completion(
             if cached is not None:
                 logger.info("cache hit model=%s tenant=%s", payload.model, key.tenant_id)
                 _record(request, background, key, provider_for_model(payload.model),
-                        payload.model, cached, 200, cache_hit=True, started=started)
+                        payload.model, cached, 200, cache_hit=True, started=started, tags=tags)
                 return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
 
         outcome = await execute_with_fallback(
@@ -354,6 +397,7 @@ async def create_chat_completion(
                 base_delay=settings.retry_base_delay,
                 max_delay=settings.retry_max_delay,
             ),
+            deployments=deployments,
         )
 
         if isinstance(outcome, Success):
@@ -363,7 +407,7 @@ async def create_chat_completion(
             if key_str is not None:
                 await cache.set(key_str, body, settings.cache_ttl_seconds)
             _record(request, background, key, outcome.candidate.provider,
-                    outcome.candidate.model, body, 200, cache_hit=False, started=started)
+                    outcome.candidate.model, body, 200, cache_hit=False, started=started, tags=tags)
             if settings.audit_capture_content:
                 background.add_task(
                     write_audit,
@@ -380,7 +424,7 @@ async def create_chat_completion(
             return JSONResponse(content=body, headers={"X-Cache": "MISS"})
 
         _record(request, background, key, candidates[0].provider, payload.model,
-                None, outcome.status_code, cache_hit=False, started=started)
+                None, outcome.status_code, cache_hit=False, started=started, tags=tags)
         return _error_response(outcome)
     finally:
         if not handed_off:
@@ -393,6 +437,7 @@ async def create_embeddings(
     request: Request,
     background: BackgroundTasks,
     key: KeyContext = Depends(require_key),
+    x_tags: Optional[str] = Header(default=None),
 ) -> Any:
     if not key.allows_model(payload.model):
         raise HTTPException(
@@ -449,7 +494,8 @@ async def create_embeddings(
         return _error_response(Failure(502, f"upstream request failed: {exc}", provider=provider))
 
     background.add_task(touch_last_used, request.app.state.session_factory, key.key_id)
-    _record(request, background, key, provider, model, result, 200, cache_hit=False, started=started)
+    _record(request, background, key, provider, model, result, 200, cache_hit=False,
+            started=started, tags=_merge_tags(key.tags, x_tags))
     return JSONResponse(content=result)
 
 
@@ -463,6 +509,7 @@ def _record(
     status: int,
     cache_hit: bool,
     started: float,
+    tags: Optional[list[str]] = None,
 ) -> None:
     """Update Prometheus metrics now and persist the usage record after the
     response is sent (off the request's hot path and DB session)."""
@@ -477,11 +524,12 @@ def _record(
         prompt_tokens=prompt,
         completion_tokens=completion,
         total_tokens=usage.get("total_tokens", prompt + completion),
-        cost_usd=cost_usd(model, prompt, completion),
+        cost_usd=_maybe_cost(model, prompt, completion),
         latency_ms=int((time.perf_counter() - started) * 1000),
         status=status,
         cache_hit=cache_hit,
         trace_id=getattr(request.state, "request_id", None),
+        tags=tags or [],
     )
     observe(event)
     background.add_task(record_usage, request.app.state.session_factory, event)
@@ -597,13 +645,27 @@ def _concurrency_limited(limit: Optional[int]) -> JSONResponse:
 def _budget_exceeded(key: KeyContext) -> JSONResponse:
     if key.token_budget is not None and key.tokens_used >= key.token_budget:
         message = f"Token budget exceeded: used {key.tokens_used} of {key.token_budget} tokens."
-    else:
+        period = key.budget_period
+    elif key.cost_budget_usd is not None and key.cost_used >= key.cost_budget_usd:
         message = (
             f"Cost budget exceeded: used ${key.cost_used:.4f} of "
             f"${key.cost_budget_usd:.4f}."
         )
-    if key.budget_period != "total":
-        message += f" (resets {key.budget_period})"
+        period = key.budget_period
+    elif key.team_token_budget is not None and key.team_tokens_used >= key.team_token_budget:
+        message = (
+            f"Team token budget exceeded: used {key.team_tokens_used} of "
+            f"{key.team_token_budget} tokens."
+        )
+        period = key.team_budget_period
+    else:
+        message = (
+            f"Team cost budget exceeded: used ${key.team_cost_used:.4f} of "
+            f"${key.team_cost_budget_usd:.4f}."
+        )
+        period = key.team_budget_period
+    if period != "total":
+        message += f" (resets {period})"
     return JSONResponse(
         status_code=429,
         content={"error": {"message": message, "type": "budget_exceeded"}},

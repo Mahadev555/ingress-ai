@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Boxes, Pencil, Plus, Trash2 } from "lucide-react";
 import { useSettings } from "../lib/settings.jsx";
 import { useAsync } from "../lib/useAsync.js";
@@ -17,7 +18,6 @@ import {
 } from "../components/ui.jsx";
 import { ConnectPrompt } from "../components/ConnectPrompt.jsx";
 
-const PROVIDERS = ["openai", "anthropic", "gemini", "azure"];
 const num = (v) => (v === "" || v == null ? null : Number(v));
 
 const EMPTY = {
@@ -57,7 +57,7 @@ function bodyFromForm(form) {
   };
 }
 
-function ModelModal({ open, model, onClose, onSaved }) {
+function ModelModal({ open, model, providers, onClose, onSaved }) {
   const { api } = useSettings();
   const editing = !!model;
   const [form, setForm] = useState(EMPTY);
@@ -66,10 +66,13 @@ function ModelModal({ open, model, onClose, onSaved }) {
 
   useEffect(() => {
     if (open) {
-      setForm(model ? formFromModel(model) : EMPTY);
+      setForm(model ? formFromModel(model) : { ...EMPTY, provider: providers[0] || "openai" });
       setError(null);
     }
-  }, [open, model]);
+  }, [open, model, providers]);
+
+  // Offer the providers you have credentials for; keep the current value on edit.
+  const providerOptions = [...new Set([...providers, form.provider].filter(Boolean))];
 
   const set = (patch) => setForm({ ...form, ...patch });
 
@@ -119,9 +122,9 @@ function ModelModal({ open, model, onClose, onSaved }) {
             <Input value={form.name} disabled={editing}
               onChange={(e) => set({ name: e.target.value })} />
           </Field>
-          <Field label="Provider">
+          <Field label="Provider" hint={providers.length ? undefined : "Add a provider credential first."}>
             <Select value={form.provider} onChange={(e) => set({ provider: e.target.value })}>
-              {PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
+              {providerOptions.map((p) => <option key={p} value={p}>{p}</option>)}
             </Select>
           </Field>
         </div>
@@ -163,10 +166,14 @@ const price = (v) => (v == null ? "—" : `$${v}`);
 export default function Models() {
   const { api, hasAdmin } = useSettings();
   const list = useAsync(() => api.listModelConfigs(), [api], { enabled: hasAdmin });
+  const credentials = useAsync(() => api.listProviders(), [api], { enabled: hasAdmin });
   const [editing, setEditing] = useState(null); // model object or {} for "new"
   const [deleting, setDeleting] = useState(null);
 
   if (!hasAdmin) return <ConnectPrompt what="the model registry" />;
+
+  // Only offer providers you've added a credential for (Providers page).
+  const providers = [...new Set((credentials.data ?? []).map((c) => c.provider))];
 
   const remove = async (id) => {
     setDeleting(id);
@@ -211,6 +218,7 @@ export default function Models() {
                 <th className="px-5 py-3 font-semibold">Alias</th>
                 <th className="px-5 py-3 text-right font-semibold">Price /1M (in / out)</th>
                 <th className="px-5 py-3 font-semibold">Defaults</th>
+                <th className="px-5 py-3 font-semibold">Backends</th>
                 <th className="px-5 py-3 font-semibold">Status</th>
                 <th className="px-5 py-3" />
               </tr>
@@ -229,6 +237,19 @@ export default function Models() {
                   <td className="px-5 py-3 text-xs text-slate-500">
                     {m.default_rate_limit_per_minute ? `${m.default_rate_limit_per_minute}/min` : "—"}
                     {m.default_tpm_limit ? ` · ${m.default_tpm_limit} tpm` : ""}
+                  </td>
+                  <td className="px-5 py-3">
+                    {m.alias_of ? (
+                      <span className="text-xs text-slate-400">via {m.alias_of}</span>
+                    ) : m.deployment_count > 0 ? (
+                      <Link to="/deployments" title="Load-balanced backends">
+                        <Badge tone="violet">
+                          {m.deployment_count} deployment{m.deployment_count > 1 ? "s" : ""}
+                        </Badge>
+                      </Link>
+                    ) : (
+                      <span className="text-xs text-slate-400">env key</span>
+                    )}
                   </td>
                   <td className="px-5 py-3">
                     {m.enabled ? <Badge tone="green">enabled</Badge> : <Badge tone="slate">disabled</Badge>}
@@ -253,6 +274,7 @@ export default function Models() {
       <ModelModal
         open={!!editing}
         model={editing && editing.id ? editing : null}
+        providers={providers}
         onClose={() => setEditing(null)}
         onSaved={list.reload}
       />

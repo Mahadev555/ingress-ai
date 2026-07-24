@@ -23,6 +23,8 @@ const num = (v) => (v === "" || v == null ? null : Number(v));
 const EMPTY_FORM = {
   name: "",
   tenant_id: "default",
+  team_id: "",
+  tags: "",
   allowed_models: "",
   token_budget: "",
   cost_budget_usd: "",
@@ -37,6 +39,8 @@ function formFromKey(k) {
   return {
     name: k.name || "",
     tenant_id: k.tenant_id || "default",
+    team_id: k.team_id == null ? "" : String(k.team_id),
+    tags: (k.tags || []).join(", "),
     allowed_models: (k.allowed_models || []).join(", "),
     token_budget: k.token_budget ?? "",
     cost_budget_usd: k.cost_budget_usd ?? "",
@@ -52,6 +56,10 @@ function formFromKey(k) {
 function bodyFromForm(form, { withTenant = false } = {}) {
   const body = {
     name: form.name || "unnamed",
+    team_id: form.team_id === "" ? null : Number(form.team_id),
+    tags: form.tags
+      ? form.tags.split(",").map((s) => s.trim()).filter(Boolean)
+      : [],
     allowed_models: form.allowed_models
       ? form.allowed_models.split(",").map((s) => s.trim()).filter(Boolean)
       : [],
@@ -85,10 +93,26 @@ function CopyButton({ value }) {
 }
 
 // Shared policy inputs used by both the create and edit modals.
-function KeyFields({ form, setForm }) {
+function KeyFields({ form, setForm, teams = [] }) {
+  const { costTracking } = useSettings();
   const set = (patch) => setForm({ ...form, ...patch });
   return (
     <>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Team" hint="Shares a budget + allowed models.">
+          <Select value={form.team_id} onChange={(e) => set({ team_id: e.target.value })}>
+            <option value="">No team</option>
+            {teams.map((t) => (
+              <option key={t.id} value={String(t.id)}>{t.name || `team #${t.id}`}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Tags" hint="Comma-separated. For spend attribution.">
+          <Input placeholder="prod, billing" value={form.tags}
+            onChange={(e) => set({ tags: e.target.value })} />
+        </Field>
+      </div>
+
       <Field label="Allowed models" hint="Comma-separated. Leave empty to allow any model.">
         <Input
           placeholder="gpt-4o-mini, claude-3-5-sonnet"
@@ -118,10 +142,12 @@ function KeyFields({ form, setForm }) {
           <Input type="number" placeholder="1000000" value={form.token_budget}
             onChange={(e) => set({ token_budget: e.target.value })} />
         </Field>
-        <Field label="Cost budget (USD)" hint="Blocks over this spend.">
-          <Input type="number" step="0.01" placeholder="50" value={form.cost_budget_usd}
-            onChange={(e) => set({ cost_budget_usd: e.target.value })} />
-        </Field>
+        {costTracking && (
+          <Field label="Cost budget (USD)" hint="Blocks over this spend.">
+            <Input type="number" step="0.01" placeholder="50" value={form.cost_budget_usd}
+              onChange={(e) => set({ cost_budget_usd: e.target.value })} />
+          </Field>
+        )}
       </div>
 
       <Field label="Budget period" hint="When token/cost budgets reset.">
@@ -135,7 +161,7 @@ function KeyFields({ form, setForm }) {
   );
 }
 
-function CreateKeyModal({ open, onClose, onCreated }) {
+function CreateKeyModal({ open, onClose, onCreated, teams }) {
   const { api } = useSettings();
   const [form, setForm] = useState(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
@@ -212,14 +238,14 @@ function CreateKeyModal({ open, onClose, onCreated }) {
                 onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
             </Field>
           </div>
-          <KeyFields form={form} setForm={setForm} />
+          <KeyFields form={form} setForm={setForm} teams={teams} />
         </div>
       )}
     </Modal>
   );
 }
 
-function EditKeyModal({ open, keyData, onClose, onSaved }) {
+function EditKeyModal({ open, keyData, onClose, onSaved, teams }) {
   const { api } = useSettings();
   const [form, setForm] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -269,20 +295,21 @@ function EditKeyModal({ open, keyData, onClose, onSaved }) {
         <Field label="Name">
           <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </Field>
-        <KeyFields form={form} setForm={setForm} />
+        <KeyFields form={form} setForm={setForm} teams={teams} />
       </div>
     </Modal>
   );
 }
 
 function LimitsCell({ k }) {
+  const { costTracking } = useSettings();
   const bits = [];
   bits.push(k.rate_limit_per_minute ? `${k.rate_limit_per_minute}/min` : "default rate");
   if (k.tpm_limit) bits.push(`${fmt(k.tpm_limit)} tpm`);
   if (k.max_concurrency) bits.push(`${k.max_concurrency} conc`);
   const budgets = [];
   if (k.token_budget) budgets.push(`${fmt(k.token_budget)} tok`);
-  if (k.cost_budget_usd) budgets.push(`$${k.cost_budget_usd}`);
+  if (costTracking && k.cost_budget_usd) budgets.push(`$${k.cost_budget_usd}`);
   return (
     <div className="flex flex-col gap-0.5 text-xs text-slate-500">
       <span>{bits.join(" · ")}</span>
@@ -296,11 +323,15 @@ function LimitsCell({ k }) {
 export default function Keys() {
   const { api, hasAdmin } = useSettings();
   const list = useAsync(() => api.listKeys(), [api], { enabled: hasAdmin });
+  const teams = useAsync(() => api.listTeams(), [api], { enabled: hasAdmin });
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
   const [revoking, setRevoking] = useState(null);
 
   if (!hasAdmin) return <ConnectPrompt what="key management" />;
+
+  const teamList = teams.data ?? [];
+  const teamName = (id) => teamList.find((t) => t.id === id)?.name || `team #${id}`;
 
   const revoke = async (id) => {
     setRevoking(id);
@@ -356,7 +387,15 @@ export default function Keys() {
                       {k.key_prefix}…
                     </code>
                   </td>
-                  <td className="px-5 py-3 font-medium text-slate-800">{k.name || "—"}</td>
+                  <td className="px-5 py-3">
+                    <div className="font-medium text-slate-800">{k.name || "—"}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                      {k.team_id != null && <Badge tone="violet">{teamName(k.team_id)}</Badge>}
+                      {(k.tags || []).map((t) => (
+                        <Badge key={t} tone="slate">#{t}</Badge>
+                      ))}
+                    </div>
+                  </td>
                   <td className="px-5 py-3 text-slate-600">
                     {k.allowed_models?.length ? (
                       <span className="flex flex-wrap gap-1">
@@ -399,12 +438,18 @@ export default function Keys() {
         </div>
       )}
 
-      <CreateKeyModal open={creating} onClose={() => setCreating(false)} onCreated={list.reload} />
+      <CreateKeyModal
+        open={creating}
+        onClose={() => setCreating(false)}
+        onCreated={list.reload}
+        teams={teamList}
+      />
       <EditKeyModal
         open={!!editing}
         keyData={editing}
         onClose={() => setEditing(null)}
         onSaved={list.reload}
+        teams={teamList}
       />
     </Card>
   );

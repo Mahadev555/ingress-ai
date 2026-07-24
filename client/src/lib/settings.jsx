@@ -22,6 +22,25 @@ export function SettingsProvider({ children }) {
     [apiBase, adminToken]
   );
 
+  // Gateway config: whether cost is tracked (drives cost UI) and the providers
+  // it has adapters for (the full supported palette). Fetched once per api.
+  const [costTracking, setCostTracking] = useState(true);
+  const [supportedProviders, setSupportedProviders] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    api
+      .config()
+      .then((c) => {
+        if (!alive || !c) return;
+        setCostTracking(c.cost_tracking_enabled !== false);
+        setSupportedProviders(c.providers || []);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [api]);
+
   const value = {
     apiBase,
     setApiBase,
@@ -31,6 +50,8 @@ export function SettingsProvider({ children }) {
     setVirtualKey,
     api,
     hasAdmin: Boolean(adminToken),
+    costTracking,
+    supportedProviders,
   };
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

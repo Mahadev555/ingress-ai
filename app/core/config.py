@@ -49,6 +49,17 @@ class Settings(BaseSettings):
     # "memory" (single instance / dev) or "redis" (multi-replica production).
     rate_limit_backend: str = "memory"
 
+    # Load balancing across a model's deployments (when the deployment registry
+    # has entries): "simple-shuffle" (weighted random), "least-busy" (fewest
+    # in-flight), or "latency" (lowest recent latency).
+    routing_strategy: str = "simple-shuffle"
+
+    # Budget alerts: POST a Slack-compatible JSON payload to this webhook when a
+    # key or team crosses a budget threshold. Empty disables alerting.
+    alert_webhook_url: str = ""
+    # Fraction of budget (0-1) at which a "soft" warning fires before the hard cap.
+    alert_soft_threshold: float = 0.8
+
     # Resilience: retry (per candidate) + circuit breaker (per provider).
     retry_attempts: int = 3
     retry_base_delay: float = 0.05
@@ -66,6 +77,10 @@ class Settings(BaseSettings):
     request_timeout: float = 60.0
 
     # Observability / audit.
+    # Cost tracking: estimate and store per-request USD cost (from registry
+    # prices) and enforce cost budgets. Turn off for a token-only gateway that
+    # leaves dollar accounting to the provider invoice.
+    cost_tracking_enabled: bool = True
     # Capture redacted prompt+response text to the audit_logs table (off by default).
     audit_capture_content: bool = False
 
@@ -77,6 +92,10 @@ class Settings(BaseSettings):
     max_output_tokens_cap: int = 0  # clamp requested max_tokens to this (0 = no cap)
     guardrails_enabled: bool = False  # simple prompt-injection screening
     admin_read_tokens: str = ""  # comma-separated read-only admin tokens
+
+    # Passphrase used to encrypt provider credential keys at rest (any string).
+    # Empty = store plaintext (fine for local dev; set this in production).
+    credential_encryption_key: str = ""
 
     def model_list(self) -> list[str]:
         """Parse the comma-separated `available_models` into a clean list."""

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 def _additive_columns(dialect: str) -> dict[str, dict[str, str]]:
     ts = "TIMESTAMP WITH TIME ZONE" if dialect == "postgresql" else "DATETIME"
+    json_type = "JSONB" if dialect == "postgresql" else "JSON"
     return {
         "virtual_keys": {
             "rate_limit_per_minute": "INTEGER",
@@ -24,12 +25,20 @@ def _additive_columns(dialect: str) -> dict[str, dict[str, str]]:
             "max_concurrency": "INTEGER",
             "expires_at": ts,
             "last_used_at": ts,
+            "team_id": "INTEGER",
+            "tags": json_type,
         },
         "usage_records": {
             "trace_id": "VARCHAR(36)",
+            "tags": json_type,
         },
         "audit_logs": {
             "conversation_id": "VARCHAR(64)",
+        },
+        # Deployments moved from carrying their own key to referencing a
+        # provider credential (provider_credentials is a new table via create_all).
+        "model_deployments": {
+            "credential_id": "INTEGER",
         },
     }
 

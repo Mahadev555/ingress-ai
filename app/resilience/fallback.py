@@ -1,9 +1,11 @@
+import time
 from dataclasses import dataclass
 from typing import Optional, Union
 
 import httpx
 
 from app.resilience.retry import ClientError, RetryConfig, TransientError, with_retries
+from app.router.deployments import DeploymentRegistry
 from app.router.health import CircuitBreaker
 from app.router.selector import Candidate
 from app.schemas.unified import ChatCompletionRequest
@@ -32,12 +34,15 @@ async def execute_with_fallback(
     client: httpx.AsyncClient,
     breaker: CircuitBreaker,
     retry_config: RetryConfig,
+    deployments: Optional[DeploymentRegistry] = None,
 ) -> Outcome:
     """Try each candidate in order until one succeeds.
 
     Per candidate: retry transient failures; on exhaustion mark the provider
     unhealthy and move on. A non-retryable 4xx is relayed immediately (no
-    failover). Open circuits are skipped.
+    failover). Open circuits are skipped. When a candidate came from a load-
+    balanced deployment, its in-flight/latency stats are updated so the next
+    request's ordering reflects reality.
     """
     failure = Failure(503, "no providers available")
 
@@ -50,6 +55,10 @@ async def execute_with_fallback(
             continue
 
         attempt_payload = payload.model_copy(update={"model": candidate.model})
+        dep_id = candidate.deployment_id
+        if deployments is not None and dep_id is not None:
+            deployments.note_start(dep_id)
+        started = time.perf_counter()
 
         try:
             response = await with_retries(
@@ -57,21 +66,31 @@ async def execute_with_fallback(
                 retry_config,
             )
         except ClientError as error:
+            _note_end(deployments, dep_id, started, ok=False)
             return Failure(
                 error.status_code, "upstream rejected the request",
                 error.body, provider=candidate.provider,
             )
         except TransientError as error:
+            _note_end(deployments, dep_id, started, ok=False)
             breaker.record_failure(candidate.provider)
             failure = Failure(
                 error.status_code, error.message, error.body, provider=candidate.provider
             )
             continue
 
+        _note_end(deployments, dep_id, started, ok=True)
         breaker.record_success(candidate.provider)
         return Success(candidate, response)
 
     return failure
+
+
+def _note_end(
+    deployments: Optional[DeploymentRegistry], dep_id: Optional[int], started: float, ok: bool
+) -> None:
+    if deployments is not None and dep_id is not None:
+        deployments.note_end(dep_id, (time.perf_counter() - started) * 1000, ok)
 
 
 async def _attempt(

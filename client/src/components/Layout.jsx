@@ -4,9 +4,12 @@ import {
   Boxes,
   KeyRound,
   LayoutDashboard,
+  Lock,
+  Network,
   ScrollText,
   Settings as SettingsIcon,
   TerminalSquare,
+  Users,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Logo } from "./Logo.jsx";
@@ -16,7 +19,10 @@ import { useSettings } from "../lib/settings.jsx";
 const NAV = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/keys", label: "API Keys", icon: KeyRound },
+  { to: "/teams", label: "Teams", icon: Users },
   { to: "/models", label: "Models", icon: Boxes },
+  { to: "/providers", label: "Providers", icon: Lock },
+  { to: "/deployments", label: "Deployments", icon: Network },
   { to: "/playground", label: "Playground", icon: TerminalSquare },
   { to: "/usage", label: "Usage", icon: BarChart3 },
   { to: "/audit", label: "Audit", icon: ScrollText },
@@ -26,7 +32,10 @@ const NAV = [
 const TITLES = {
   "/": "Overview",
   "/keys": "API Keys",
+  "/teams": "Teams",
   "/models": "Model Registry",
+  "/providers": "Provider Credentials",
+  "/deployments": "Model Deployments",
   "/playground": "Playground",
   "/usage": "Usage & Metrics",
   "/audit": "Audit Logs",
