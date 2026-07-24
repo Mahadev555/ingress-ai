@@ -15,6 +15,29 @@ class Base(DeclarativeBase):
 JsonList = JSON().with_variant(JSONB(), "postgresql")
 
 
+class Team(Base):
+    """A group of virtual keys that share a budget and an allowed-model list.
+
+    The tenancy layer: keys can belong to a team, and a request is blocked if
+    either the key's *or* its team's budget is exhausted. `allowed_models` on a
+    team further narrows what its keys may call (intersection with the key list).
+    """
+
+    __tablename__ = "teams"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), default="")
+    # Team-wide allowed models; empty means "no team-level restriction".
+    allowed_models: Mapped[list] = mapped_column(JsonList, default=list)
+    token_budget: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    cost_budget_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    budget_period: Mapped[str] = mapped_column(String(16), default="total")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class VirtualKey(Base):
     __tablename__ = "virtual_keys"
 
@@ -25,6 +48,10 @@ class VirtualKey(Base):
     key_prefix: Mapped[str] = mapped_column(String(24), index=True)
     key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     tenant_id: Mapped[str] = mapped_column(String(64), default="default")
+    # Optional team this key belongs to (shared budget + allowed models).
+    team_id: Mapped[Optional[int]] = mapped_column(Integer, index=True, nullable=True)
+    # Tags applied to every request this key makes, for spend attribution.
+    tags: Mapped[list] = mapped_column(JsonList, default=list)
     # Empty list means "any model is allowed".
     allowed_models: Mapped[list] = mapped_column(JsonList, default=list)
     token_budget: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -67,12 +94,37 @@ class ModelConfig(Base):
     )
 
 
+class ModelDeployment(Base):
+    """One concrete backend for a public model name. A model can have many
+    deployments (different provider keys, regions, or base URLs); the router
+    load-balances across the healthy ones. This is what lets the gateway spread
+    load over several keys/regions instead of routing to a single upstream."""
+
+    __tablename__ = "model_deployments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # The public model name clients request (e.g. "gpt-4o-mini").
+    model_name: Mapped[str] = mapped_column(String(128), index=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    # Upstream credential + optional endpoint override; server-side only.
+    api_key: Mapped[str] = mapped_column(String(256), default="")
+    base_url: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    # Relative weight for the weighted-shuffle strategy.
+    weight: Mapped[int] = mapped_column(Integer, default=1)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class UsageRecord(Base):
     __tablename__ = "usage_records"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     key_id: Mapped[int] = mapped_column(Integer, index=True)
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    # Spend-attribution tags (key tags merged with per-request X-Tags).
+    tags: Mapped[list] = mapped_column(JsonList, default=list)
     provider: Mapped[str] = mapped_column(String(32))
     model: Mapped[str] = mapped_column(String(128))
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)

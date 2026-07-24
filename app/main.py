@@ -11,9 +11,11 @@ from app.core.concurrency import ConcurrencyLimiter
 from app.core.config import get_settings
 from app.core.model_registry import registry as model_registry
 from app.core.ratelimit import create_rate_limiter
+from app.db.seed import seed_models_if_empty
 from app.db.session import create_engine, init_models
 from app.observability.logging import configure_logging
 from app.observability.metrics import render_latest
+from app.router.deployments import registry as deployment_registry
 from app.router.health import CircuitBreaker
 
 
@@ -34,8 +36,14 @@ async def lifespan(app: FastAPI):
     app.state.db_engine = engine
     app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
+    # Make the DB the source of truth for models: import the env list on first run.
+    await seed_models_if_empty(app.state.session_factory, settings)
+
     await model_registry.reload(app.state.session_factory)
     app.state.model_registry = model_registry
+
+    await deployment_registry.reload(app.state.session_factory)
+    app.state.deployment_registry = deployment_registry
 
     app.state.rate_limiter = create_rate_limiter(settings)
     app.state.circuit_breaker = CircuitBreaker(

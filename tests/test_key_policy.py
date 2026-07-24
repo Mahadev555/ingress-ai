@@ -87,6 +87,14 @@ def test_tpm_limit_is_enforced(make_gateway):
 
 def test_cost_budget_is_enforced(make_gateway):
     with make_gateway(_handler) as client:
+        # Cost only accrues when the model is priced (no hardcoded prices).
+        models = client.get("/admin/models", headers=ADMIN).json()
+        mini = next(m for m in models if m["name"] == "gpt-4o-mini")
+        client.patch(
+            f"/admin/models/{mini['id']}",
+            headers=ADMIN,
+            json={"input_price_per_1m": 1.0, "output_price_per_1m": 1.0},
+        )
         key = _mint(client, name="cost", cost_budget_usd=1e-7)["key"]
         headers = {"Authorization": f"Bearer {key}"}
         payload = {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]}
