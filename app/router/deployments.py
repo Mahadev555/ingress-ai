@@ -35,6 +35,8 @@ class Deployment:
     base_url: Optional[str]
     weight: int
     enabled: bool
+    # Provider-side name sent upstream (e.g. Azure deployment name); None = model_name.
+    upstream_model: Optional[str] = None
 
 
 @dataclass
@@ -70,6 +72,7 @@ class DeploymentRegistry:
                     base_url=cred.base_url,
                     weight=max(1, r.weight or 1),
                     enabled=r.enabled,
+                    upstream_model=r.upstream_model,
                 )
             )
         self.set(resolved)

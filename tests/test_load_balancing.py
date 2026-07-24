@@ -127,6 +127,43 @@ def test_cannot_delete_model_with_deployments(make_gateway):
     assert next(m for m in refreshed if m["name"] == "gpt-4o-mini")["deployment_count"] == 1
 
 
+def test_upstream_model_override_routes_to_azure_deployment(make_gateway):
+    """One public model can fan out to differently-named Azure deployments via
+    the per-deployment upstream_model override (used in the URL path)."""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        return httpx.Response(200, json=CHAT_OK)
+
+    with make_gateway(handler) as client:
+        client.post("/admin/models", headers=ADMIN, json={"name": "azure/gpt-4o", "provider": "azure"})
+        cid = client.post(
+            "/admin/providers",
+            headers=ADMIN,
+            json={"name": "az", "provider": "azure", "api_key": "k",
+                  "base_url": "https://x.openai.azure.com"},
+        ).json()["id"]
+        created = client.post(
+            "/admin/deployments",
+            headers=ADMIN,
+            json={"model_name": "azure/gpt-4o", "credential_id": cid, "upstream_model": "gpt-4o-1"},
+        )
+        assert created.status_code == 200, created.text
+        assert created.json()["upstream_model"] == "gpt-4o-1"
+
+        r = client.post(
+            "/v1/chat/completions",
+            json={"model": "azure/gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
+        )
+        assert r.status_code == 200
+        # Usage is recorded under the public model name, not the deployment name.
+        recent = client.get("/admin/usage/recent", headers=ADMIN).json()
+
+    assert "/deployments/gpt-4o-1/" in seen["path"]  # routed to the override
+    assert recent[0]["model"] == "azure/gpt-4o"  # accounted under the public name
+
+
 def test_failover_across_credential_keys(make_gateway):
     """One credential's key fails; the request fails over to the other."""
 

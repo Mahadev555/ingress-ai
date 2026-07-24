@@ -688,12 +688,14 @@ async def delete_credential(
 class DeploymentRequest(BaseModel):
     model_name: str
     credential_id: int
+    upstream_model: Optional[str] = None  # e.g. Azure deployment name
     weight: int = 1
     enabled: bool = True
 
 
 class DeploymentUpdate(BaseModel):
     credential_id: Optional[int] = None
+    upstream_model: Optional[str] = None
     weight: Optional[int] = None
     enabled: Optional[bool] = None
 
@@ -704,6 +706,7 @@ class DeploymentInfo(BaseModel):
     credential_id: int
     credential_name: str  # resolved for display
     provider: str  # inherited from the credential
+    upstream_model: Optional[str]
     weight: int
     enabled: bool
 
@@ -715,6 +718,7 @@ def _deployment_info(d: ModelDeployment, cred: Optional[ProviderCredential]) -> 
         credential_id=d.credential_id,
         credential_name=cred.name if cred else "(deleted)",
         provider=cred.provider if cred else "—",
+        upstream_model=d.upstream_model,
         weight=d.weight,
         enabled=d.enabled,
     )

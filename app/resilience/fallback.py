@@ -54,7 +54,9 @@ async def execute_with_fallback(
             )
             continue
 
-        attempt_payload = payload.model_copy(update={"model": candidate.model})
+        # Send the provider-side name upstream (Azure deployment name, etc.);
+        # accounting still uses the public candidate.model.
+        attempt_payload = payload.model_copy(update={"model": candidate.wire_model})
         dep_id = candidate.deployment_id
         if deployments is not None and dep_id is not None:
             deployments.note_start(dep_id)

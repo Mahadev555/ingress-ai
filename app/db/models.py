@@ -127,6 +127,10 @@ class ModelDeployment(Base):
     model_name: Mapped[str] = mapped_column(String(128), index=True)
     # The provider credential this deployment routes through.
     credential_id: Mapped[int] = mapped_column(Integer, index=True)
+    # Provider-side name actually sent upstream when it differs from model_name —
+    # e.g. an Azure deployment name (gpt-4o-1). Null = use model_name. This is
+    # what lets one public model fan out to differently-named backends.
+    upstream_model: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     # Relative weight for the weighted-shuffle strategy.
     weight: Mapped[int] = mapped_column(Integer, default=1)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
