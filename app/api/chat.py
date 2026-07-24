@@ -21,7 +21,7 @@ from app.observability.metrics import observe
 from app.observability.pricing import cost_usd
 from app.observability.usage import record_usage, touch_last_used, write_audit
 from app.providers.base import EmbeddingsUnsupported, UpstreamStreamError
-from app.providers.registry import creds_for_provider, provider_for_model, ADAPTERS
+from app.providers.registry import creds_for_provider, resolve_provider, ADAPTERS
 from app.schemas.embeddings import EmbeddingRequest
 from app.resilience.fallback import Failure, Success, execute_with_fallback
 from app.resilience.retry import RetryConfig
@@ -197,7 +197,7 @@ async def list_models(
             names = [m for m in names if key.allows_model(m)]
 
     data = [
-        {"id": model, "object": "model", "owned_by": provider_for_model(model)}
+        {"id": model, "object": "model", "owned_by": resolve_provider(model)}
         for model in names
     ]
     return {"object": "list", "data": data}
@@ -383,7 +383,7 @@ async def create_chat_completion(
             cached = await cache.get(key_str)
             if cached is not None:
                 logger.info("cache hit model=%s tenant=%s", payload.model, key.tenant_id)
-                _record(request, background, key, provider_for_model(payload.model),
+                _record(request, background, key, resolve_provider(payload.model),
                         payload.model, cached, 200, cache_hit=True, started=started, tags=tags)
                 return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
 
@@ -457,7 +457,7 @@ async def create_embeddings(
 
     registry = request.app.state.model_registry
     model = registry.resolve_alias(payload.model)
-    provider = provider_for_model(model)
+    provider = resolve_provider(model)
     creds = creds_for_provider(provider, settings)
     if not creds.api_key:
         return _not_configured(provider)
@@ -587,6 +587,11 @@ _PROVIDER_ENV = {
     "gemini": "GEMINI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "azure": "AZURE_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "ollama": "OLLAMA_API_KEY",
 }
 
 

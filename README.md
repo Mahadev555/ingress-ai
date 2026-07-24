@@ -54,7 +54,7 @@ flowchart LR
 ## Features
 
 - **Unified API** — OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings`, streaming and non-streaming.
-- **4 providers, one interface** — OpenAI, Anthropic, Azure OpenAI, Google Gemini, routed by model name.
+- **Many providers, one interface** — OpenAI, Anthropic, Azure OpenAI, Google Gemini, plus OpenAI-compatible endpoints (Groq, Together, DeepSeek, OpenRouter, Ollama), routed by model.
 - **Virtual keys** — hashed, per-key allowed models, admin-managed; provider keys never leave the server.
 - **Per-key governance** — request/min and token/min limits, concurrency caps, token & cost budgets (daily/monthly), and key expiry.
 - **Model registry** — DB-backed pricing, aliases, enable/disable, and default limits (overrides the env model list).
@@ -221,6 +221,21 @@ same request shape for all of them:
 | `gemini-*` | Google Gemini |
 | `claude-*` | Anthropic |
 | `azure/<deployment>` | Azure OpenAI |
+
+### OpenAI-compatible providers
+
+**Groq, Together, DeepSeek, OpenRouter, and Ollama** speak the exact OpenAI
+Chat Completions format, so they need no new adapter — only a base URL + key.
+Because their model names aren't prefixable (`llama-3.1-70b`, `deepseek-chat`),
+routing comes from the **model registry's provider**, not the name. To use one:
+
+1. Set its key (e.g. `GROQ_API_KEY`) — or add a credential on the **Providers** page.
+2. Register the model on the **Models** page with the matching provider (`groq`,
+   `together`, `deepseek`, `openrouter`, `ollama`).
+
+That's it — clients then call the model by name like any other. Base URLs default
+to each provider's public endpoint and are overridable (`GROQ_BASE_URL`, …).
+Adding another OpenAI-compatible provider is a one-line entry in the registry.
 
 ## Admin endpoints
 

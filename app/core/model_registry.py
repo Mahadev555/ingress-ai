@@ -68,6 +68,11 @@ class ModelRegistry:
         entry = self._models.get(model)
         return entry.alias_of if entry and entry.alias_of else model
 
+    def provider_of(self, model: str) -> Optional[str]:
+        """The provider a registered model routes to, or None if unregistered."""
+        entry = self._models.get(model)
+        return entry.provider if entry else None
+
     def is_enabled(self, model: str) -> bool:
         entry = self._models.get(model)
         return entry.enabled if entry else True  # unknown models are allowed

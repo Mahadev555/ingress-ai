@@ -6,8 +6,7 @@ from app.providers.base import ProviderAdapter, ProviderCreds
 from app.providers.registry import (
     ADAPTERS,
     creds_for_provider,
-    provider_for_model,
-    resolve_model,
+    resolve_provider,
 )
 from app.router.deployments import Deployment, DeploymentRegistry
 
@@ -80,13 +79,15 @@ def build_candidates(
                 )
             continue
 
-        adapter, creds = resolve_model(candidate_model, settings)
+        # No deployments for this model → its single env credential, with the
+        # provider taken from the registry (falls back to name prefix).
+        provider = resolve_provider(candidate_model)
         candidates.append(
             Candidate(
-                provider=provider_for_model(candidate_model),
+                provider=provider,
                 model=candidate_model,
-                adapter=adapter,
-                creds=creds,
+                adapter=ADAPTERS[provider],
+                creds=creds_for_provider(provider, settings),
             )
         )
 
