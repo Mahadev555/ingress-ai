@@ -331,7 +331,7 @@ async def create_chat_completion(
             candidate = next(
                 (c for c in candidates if not breaker.is_open(c.provider)), candidates[0]
             )
-            stream_payload = payload.model_copy(update={"model": candidate.model})
+            stream_payload = payload.model_copy(update={"model": candidate.wire_model})
             stream = candidate.adapter.stream(stream_payload, candidate.creds, client).__aiter__()
 
             # Pull the first chunk before responding: this opens the upstream

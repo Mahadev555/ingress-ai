@@ -20,12 +20,13 @@ import { ConnectPrompt } from "../components/ConnectPrompt.jsx";
 
 const num = (v) => (v === "" || v == null ? 1 : Number(v));
 
-const EMPTY = { model_name: "", credential_id: "", weight: "1", enabled: true };
+const EMPTY = { model_name: "", credential_id: "", upstream_model: "", weight: "1", enabled: true };
 
 function formFromDeployment(d) {
   return {
     model_name: d.model_name,
     credential_id: String(d.credential_id),
+    upstream_model: d.upstream_model ?? "",
     weight: String(d.weight ?? 1),
     enabled: d.enabled,
   };
@@ -57,6 +58,7 @@ function DeploymentModal({ open, deployment, models, credentials, onClose, onSav
     try {
       const body = {
         credential_id: Number(form.credential_id),
+        upstream_model: form.upstream_model ? form.upstream_model : null,
         weight: num(form.weight),
         enabled: !!form.enabled,
       };
@@ -118,6 +120,18 @@ function DeploymentModal({ open, deployment, models, credentials, onClose, onSav
               <option key={c.id} value={String(c.id)}>{c.name} ({c.provider})</option>
             ))}
           </Select>
+        </Field>
+
+        <Field
+          label="Upstream model name"
+          hint={
+            model?.provider === "azure"
+              ? "Azure deployment name if it differs from the model (e.g. gpt-4o-1)."
+              : "Optional. Overrides the name sent upstream; leave blank to use the model name."
+          }
+        >
+          <Input placeholder={model?.provider === "azure" ? "gpt-4o-1" : "(same as model)"}
+            value={form.upstream_model} onChange={(e) => set({ upstream_model: e.target.value })} />
         </Field>
 
         <Field label="Weight" hint="Relative share for weighted routing.">
@@ -213,7 +227,12 @@ export default function Deployments() {
             <tbody className="divide-y divide-slate-100">
               {list.data.map((d) => (
                 <tr key={d.id} className="hover:bg-slate-50/60">
-                  <td className="px-5 py-3 font-medium text-slate-800"><code>{d.model_name}</code></td>
+                  <td className="px-5 py-3 font-medium text-slate-800">
+                    <code>{d.model_name}</code>
+                    {d.upstream_model && (
+                      <span className="ml-1 text-xs font-normal text-slate-400">→ {d.upstream_model}</span>
+                    )}
+                  </td>
                   <td className="px-5 py-3"><Badge tone="brand">{d.provider}</Badge></td>
                   <td className="px-5 py-3">
                     <Link to="/providers" className="text-slate-600 hover:underline">{d.credential_name}</Link>

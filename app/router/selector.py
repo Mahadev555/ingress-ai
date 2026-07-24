@@ -15,12 +15,20 @@ from app.router.deployments import Deployment, DeploymentRegistry
 @dataclass
 class Candidate:
     provider: str
-    model: str
+    model: str  # public name — used for accounting/pricing
     adapter: ProviderAdapter
     creds: ProviderCreds
     # Set when this candidate came from a load-balanced deployment, so the
     # router can attribute latency/in-flight stats back to it.
     deployment_id: Optional[int] = None
+    # Provider-side name to send upstream (e.g. Azure deployment name). None =
+    # use `model`. Lets one public model fan out to differently-named backends.
+    upstream_model: Optional[str] = None
+
+    @property
+    def wire_model(self) -> str:
+        """The model name actually sent to the provider."""
+        return self.upstream_model or self.model
 
 
 def _creds_from_deployment(dep: Deployment, settings: Settings) -> ProviderCreds:
@@ -67,6 +75,7 @@ def build_candidates(
                         adapter=ADAPTERS[dep.provider],
                         creds=_creds_from_deployment(dep, settings),
                         deployment_id=dep.id,
+                        upstream_model=dep.upstream_model,
                     )
                 )
             continue

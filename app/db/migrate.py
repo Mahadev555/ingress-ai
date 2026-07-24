@@ -39,6 +39,7 @@ def _additive_columns(dialect: str) -> dict[str, dict[str, str]]:
         # provider credential (provider_credentials is a new table via create_all).
         "model_deployments": {
             "credential_id": "INTEGER",
+            "upstream_model": "VARCHAR(128)",
         },
     }
 
