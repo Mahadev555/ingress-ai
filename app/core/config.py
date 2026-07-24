@@ -32,6 +32,23 @@ class Settings(BaseSettings):
     azure_endpoint: str = ""
     azure_api_version: str = "2024-02-15-preview"
 
+    # OpenAI-compatible providers: same wire format, different base URL + key.
+    # Each works the moment its key is set (or via a credential in the UI).
+    groq_api_key: str = ""
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+
+    together_api_key: str = ""
+    together_base_url: str = "https://api.together.xyz/v1"
+
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+
+    ollama_api_key: str = ""  # Ollama ignores it, but a value marks it "configured"
+    ollama_base_url: str = "http://localhost:11434/v1"
+
     # Shared infrastructure.
     # SQLite by default for zero-config local dev; set DATABASE_URL to a
     # Postgres DSN (postgresql+asyncpg://...) in production.

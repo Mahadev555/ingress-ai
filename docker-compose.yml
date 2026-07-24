@@ -15,6 +15,12 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AZURE_API_KEY: ${AZURE_API_KEY:-}
       AZURE_ENDPOINT: ${AZURE_ENDPOINT:-}
+      # OpenAI-compatible providers (optional)
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      TOGETHER_API_KEY: ${TOGETHER_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

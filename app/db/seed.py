@@ -27,6 +27,11 @@ _ENV_PROVIDERS = [
     ("anthropic", lambda s: s.anthropic_api_key),
     ("gemini", lambda s: s.gemini_api_key),
     ("azure", lambda s: s.azure_api_key),
+    ("groq", lambda s: s.groq_api_key),
+    ("together", lambda s: s.together_api_key),
+    ("deepseek", lambda s: s.deepseek_api_key),
+    ("openrouter", lambda s: s.openrouter_api_key),
+    ("ollama", lambda s: s.ollama_api_key),
 ]
 
 
