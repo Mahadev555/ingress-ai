@@ -4,6 +4,7 @@ import Overview from "./pages/Overview.jsx";
 import Keys from "./pages/Keys.jsx";
 import Teams from "./pages/Teams.jsx";
 import Models from "./pages/Models.jsx";
+import Providers from "./pages/Providers.jsx";
 import Deployments from "./pages/Deployments.jsx";
 import Playground from "./pages/Playground.jsx";
 import Usage from "./pages/Usage.jsx";
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="keys" element={<Keys />} />
         <Route path="teams" element={<Teams />} />
         <Route path="models" element={<Models />} />
+        <Route path="providers" element={<Providers />} />
         <Route path="deployments" element={<Deployments />} />
         <Route path="playground" element={<Playground />} />
         <Route path="usage" element={<Usage />} />

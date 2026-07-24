@@ -22,14 +22,19 @@ export function SettingsProvider({ children }) {
     [apiBase, adminToken]
   );
 
-  // Whether the gateway tracks dollar cost (COST_TRACKING_ENABLED). Drives
-  // whether the dashboard shows cost columns/estimates. Assume on until told.
+  // Gateway config: whether cost is tracked (drives cost UI) and the providers
+  // it has adapters for (the full supported palette). Fetched once per api.
   const [costTracking, setCostTracking] = useState(true);
+  const [supportedProviders, setSupportedProviders] = useState([]);
   useEffect(() => {
     let alive = true;
     api
       .config()
-      .then((c) => alive && c && setCostTracking(c.cost_tracking_enabled !== false))
+      .then((c) => {
+        if (!alive || !c) return;
+        setCostTracking(c.cost_tracking_enabled !== false);
+        setSupportedProviders(c.providers || []);
+      })
       .catch(() => {});
     return () => {
       alive = false;
@@ -46,6 +51,7 @@ export function SettingsProvider({ children }) {
     api,
     hasAdmin: Boolean(adminToken),
     costTracking,
+    supportedProviders,
   };
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

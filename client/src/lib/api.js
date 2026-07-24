@@ -80,6 +80,15 @@ export function createApi({ baseUrl = "", adminToken = "" } = {}) {
     deleteModelConfig: (id) =>
       request(`${baseUrl}/admin/models/${id}`, { method: "DELETE", headers: admin() }),
 
+    // Admin — provider credentials (where keys live)
+    listProviders: () => request(`${baseUrl}/admin/providers`, { headers: admin() }),
+    createProvider: (body) =>
+      request(`${baseUrl}/admin/providers`, { method: "POST", body, headers: admin() }),
+    updateProvider: (id, body) =>
+      request(`${baseUrl}/admin/providers/${id}`, { method: "PATCH", body, headers: admin() }),
+    deleteProvider: (id) =>
+      request(`${baseUrl}/admin/providers/${id}`, { method: "DELETE", headers: admin() }),
+
     // Admin — model deployments (load balancing)
     listDeployments: () => request(`${baseUrl}/admin/deployments`, { headers: admin() }),
     createDeployment: (body) =>
