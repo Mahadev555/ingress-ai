@@ -63,6 +63,9 @@ db.sqlite3-journal
 ingress.db
 *.sqlite
 *.sqlite3
+# SQLite backups hold real usage data — never commit them.
+*.db.bak-*
+/backups/
 
 # Flask stuff:
 instance/
