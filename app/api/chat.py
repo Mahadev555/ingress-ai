@@ -211,6 +211,8 @@ async def client_config() -> dict:
     return {
         "max_conversation_turns": settings.max_conversation_turns,
         "cost_tracking_enabled": settings.cost_tracking_enabled,
+        # Whether the MCP gateway endpoint (POST /mcp) is enabled.
+        "mcp_enabled": settings.mcp_enabled,
         # Providers the gateway has an adapter for (the full supported palette).
         "providers": sorted(ADAPTERS.keys()),
     }
