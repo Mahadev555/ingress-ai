@@ -62,6 +62,7 @@ flowchart LR
 - **Caching** — exact-match response cache, per-tenant (`X-Cache: HIT/MISS`).
 - **Observability** — usage/cost ledger (queryable per key), Prometheus `/metrics`, trace IDs, optional redacted audit capture.
 - **Audit & conversation grouping** — opt-in capture of prompt/response pairs, grouped into conversations via an optional `X-Conversation-ID` header, with the virtual key used shown per conversation.
+- **MCP gateway** (opt-in) — one governed MCP endpoint (`POST /mcp`) fronting many upstream MCP servers: tools aggregated and namespaced, scoped per virtual key, and written to the same usage ledger.
 - **Guardrails** — request-size limits, `max_tokens` caps, and opt-in prompt-injection screening.
 - **Dashboard** — a React console (`client/`) for keys, a model registry, a chat playground, usage/metrics, and audit logs.
 
@@ -237,6 +238,45 @@ That's it — clients then call the model by name like any other. Base URLs defa
 to each provider's public endpoint and are overridable (`GROQ_BASE_URL`, …).
 Adding another OpenAI-compatible provider is a one-line entry in the registry.
 
+## MCP Gateway
+
+The gateway can also front **MCP servers**, not just LLM providers — one governed
+MCP endpoint over many upstream servers, reusing the same virtual keys, scoping,
+and usage ledger. The principle: the gateway is an **MCP server to your clients**
+and an **MCP client to the upstream servers**. Every LLM-gateway pillar maps 1:1.
+
+| LLM gateway | MCP gateway |
+|---|---|
+| OpenAI API → many providers | `POST /mcp` → many MCP servers |
+| Route by model name | Route by server namespace (`github__create_issue`) |
+| `allowed_models` per key | `allowed_servers` / `allowed_tools` per key |
+| Model registry | MCP server registry (`/admin/mcp/servers`) |
+| Usage ledger (tokens/cost) | Tool-call ledger (calls/latency, one ledger via `kind`) |
+
+Enable it and register an upstream:
+
+```bash
+# 1. Turn it on (off by default)
+MCP_ENABLED=true
+
+# 2. Register an upstream MCP server (remote Streamable HTTP)
+curl http://localhost:8000/admin/mcp/servers \
+  -H "X-Admin-Token: $ADMIN_API_KEY" -H "Content-Type: application/json" \
+  -d '{"name": "github", "url": "https://mcp.example.com/mcp",
+       "auth_header": "Authorization", "auth_value": "Bearer <upstream-token>"}'
+```
+
+Point any MCP client (Cursor, Claude Desktop, your app) at `POST /mcp` with a
+virtual key as the bearer token. `tools/list` fans out to every server the key is
+allowed to use and returns their tools namespaced `{server}__{tool}`; a
+`tools/call` is demuxed back to its server, scope-checked, forwarded, and
+recorded. Upstream credentials stay server-side (encrypted at rest, never
+returned) exactly like provider keys.
+
+v1 fronts remote **Streamable HTTP** upstreams and the `initialize` / `tools/list`
+/ `tools/call` surface; `resources/*`, `prompts/*`, and stdio servers are on the
+roadmap (see [plan/MCP-Gateway-Build-Plan.md](plan/MCP-Gateway-Build-Plan.md)).
+
 ## Admin endpoints
 
 All require the `X-Admin-Token` header (set `ADMIN_API_KEY`).
@@ -249,6 +289,7 @@ All require the `X-Admin-Token` header (set `ADMIN_API_KEY`).
 | `DELETE` | `/admin/keys/{id}` | Revoke a key (deactivates, keeps usage history) |
 | `GET` | `/admin/usage` | Usage totals (requests, tokens, cost); `?days=N` to window |
 | `GET/POST/PATCH/DELETE` | `/admin/models` | Model registry (pricing, aliases, enable/disable, default limits) |
+| `GET/POST/PATCH/DELETE` | `/admin/mcp/servers` | MCP server registry (upstream auth redacted; when MCP is enabled) |
 | `GET` | `/admin/audit` | Captured prompt/response turns, grouped into conversations (when audit is enabled) |
 
 Reads accept any admin token (including `ADMIN_READ_TOKENS`); create/edit/delete

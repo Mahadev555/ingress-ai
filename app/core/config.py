@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     # Empty = store plaintext (fine for local dev; set this in production).
     credential_encryption_key: str = ""
 
+    # MCP gateway: front many upstream MCP servers behind one governed endpoint
+    # (POST /mcp), reusing virtual keys, limits, and the usage ledger. Off by
+    # default — the endpoint 404s until enabled.
+    mcp_enabled: bool = False
+    # Upstream MCP tool-call timeout, in seconds.
+    mcp_tool_timeout: float = 30.0
+
     def model_list(self) -> list[str]:
         """Parse the comma-separated `available_models` into a clean list."""
         return [m.strip() for m in self.available_models.split(",") if m.strip()]

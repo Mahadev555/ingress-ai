@@ -73,6 +73,7 @@ async def record_usage(
                     key_id=event.key_id,
                     tenant_id=event.tenant_id,
                     tags=event.tags,
+                    kind=event.kind,
                     provider=event.provider,
                     model=event.model,
                     prompt_tokens=event.prompt_tokens,

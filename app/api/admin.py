@@ -7,10 +7,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_admin, require_admin_read
+from app.api.mcp import NAMESPACE_SEP
 from app.core.auth import generate_key
 from app.core.secrets import encrypt
 from app.db.models import (
     AuditLog,
+    MCPServer,
     ModelConfig,
     ModelDeployment,
     ProviderCredential,
@@ -31,6 +33,8 @@ class CreateKeyRequest(BaseModel):
     team_id: Optional[int] = None
     tags: list[str] = Field(default_factory=list)
     allowed_models: list[str] = Field(default_factory=list)
+    allowed_servers: list[str] = Field(default_factory=list)
+    allowed_tools: list[str] = Field(default_factory=list)
     token_budget: Optional[int] = None
     cost_budget_usd: Optional[float] = None
     budget_period: str = "total"  # "total" | "daily" | "monthly"
@@ -48,6 +52,8 @@ class UpdateKeyRequest(BaseModel):
     team_id: Optional[int] = None
     tags: Optional[list[str]] = None
     allowed_models: Optional[list[str]] = None
+    allowed_servers: Optional[list[str]] = None
+    allowed_tools: Optional[list[str]] = None
     token_budget: Optional[int] = None
     cost_budget_usd: Optional[float] = None
     budget_period: Optional[str] = None
@@ -65,6 +71,8 @@ class KeyInfo(BaseModel):
     team_id: Optional[int]
     tags: list[str]
     allowed_models: list[str]
+    allowed_servers: list[str]
+    allowed_tools: list[str]
     token_budget: Optional[int]
     cost_budget_usd: Optional[float]
     budget_period: str
@@ -95,6 +103,8 @@ async def create_key(
         team_id=body.team_id,
         tags=body.tags,
         allowed_models=body.allowed_models,
+        allowed_servers=body.allowed_servers,
+        allowed_tools=body.allowed_tools,
         token_budget=body.token_budget,
         cost_budget_usd=body.cost_budget_usd,
         budget_period=body.budget_period,
@@ -119,6 +129,8 @@ def _key_info(key: VirtualKey) -> KeyInfo:
         team_id=key.team_id,
         tags=list(key.tags or []),
         allowed_models=list(key.allowed_models or []),
+        allowed_servers=list(key.allowed_servers or []),
+        allowed_tools=list(key.allowed_tools or []),
         token_budget=key.token_budget,
         cost_budget_usd=key.cost_budget_usd,
         budget_period=key.budget_period or "total",
@@ -933,6 +945,140 @@ async def team_usage(team_id: int, session: AsyncSession = Depends(get_session))
         token_budget=team.token_budget,
         cost_budget_usd=team.cost_budget_usd,
     )
+
+
+# --- MCP servers -------------------------------------------------------------
+
+
+class MCPServerRequest(BaseModel):
+    name: str
+    url: str
+    transport: str = "http"
+    auth_header: Optional[str] = None
+    auth_value: str = ""  # upstream secret; encrypted at rest, never returned
+    description: str = ""
+    default_rate_limit_per_minute: Optional[int] = None
+    default_max_concurrency: Optional[int] = None
+    enabled: bool = True
+
+
+class MCPServerUpdate(BaseModel):
+    name: Optional[str] = None
+    url: Optional[str] = None
+    transport: Optional[str] = None
+    auth_header: Optional[str] = None
+    auth_value: Optional[str] = None  # send a new value to rotate; omit to keep
+    description: Optional[str] = None
+    default_rate_limit_per_minute: Optional[int] = None
+    default_max_concurrency: Optional[int] = None
+    enabled: Optional[bool] = None
+
+
+class MCPServerInfo(BaseModel):
+    id: int
+    name: str
+    url: str
+    transport: str
+    auth_header: Optional[str]
+    has_auth: bool  # the auth value itself is never returned
+    description: str
+    default_rate_limit_per_minute: Optional[int]
+    default_max_concurrency: Optional[int]
+    enabled: bool
+
+
+def _mcp_info(s: MCPServer) -> MCPServerInfo:
+    return MCPServerInfo(
+        id=s.id,
+        name=s.name,
+        url=s.url,
+        transport=s.transport,
+        auth_header=s.auth_header,
+        has_auth=bool(s.auth_value),
+        description=s.description,
+        default_rate_limit_per_minute=s.default_rate_limit_per_minute,
+        default_max_concurrency=s.default_max_concurrency,
+        enabled=s.enabled,
+    )
+
+
+async def _reload_mcp(request: Request) -> None:
+    await request.app.state.mcp_registry.reload(request.app.state.session_factory)
+
+
+@router.get("/mcp/servers", response_model=list[MCPServerInfo])
+async def list_mcp_servers(session: AsyncSession = Depends(get_session)) -> list[MCPServerInfo]:
+    rows = (await session.execute(select(MCPServer).order_by(MCPServer.name))).scalars()
+    return [_mcp_info(s) for s in rows]
+
+
+@router.post("/mcp/servers", response_model=MCPServerInfo, dependencies=_WRITE)
+async def create_mcp_server(
+    body: MCPServerRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> MCPServerInfo:
+    if NAMESPACE_SEP in body.name:
+        raise HTTPException(
+            status_code=400,
+            detail=f"server name may not contain '{NAMESPACE_SEP}' (it separates the tool namespace)",
+        )
+    exists = (
+        await session.execute(select(MCPServer).where(MCPServer.name == body.name))
+    ).scalar_one_or_none()
+    if exists is not None:
+        raise HTTPException(status_code=409, detail="an MCP server with that name already exists")
+    fields = body.model_dump()
+    server = MCPServer(**{**fields, "auth_value": encrypt(body.auth_value)})
+    session.add(server)
+    await session.commit()
+    await session.refresh(server)
+    await _reload_mcp(request)
+    return _mcp_info(server)
+
+
+@router.patch("/mcp/servers/{server_id}", response_model=MCPServerInfo, dependencies=_WRITE)
+async def update_mcp_server(
+    server_id: int,
+    body: MCPServerUpdate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> MCPServerInfo:
+    server = await session.get(MCPServer, server_id)
+    if server is None:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    fields = body.model_dump(exclude_unset=True)
+    if fields.get("name") and NAMESPACE_SEP in fields["name"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"server name may not contain '{NAMESPACE_SEP}'",
+        )
+    if "auth_value" in fields:
+        # A new value rotates it; encrypt before storing. (Blank clears it.)
+        server.auth_value = encrypt(fields.pop("auth_value") or "")
+    for field_name, value in fields.items():
+        setattr(server, field_name, value)
+    await session.commit()
+    await session.refresh(server)
+    await _reload_mcp(request)
+    return _mcp_info(server)
+
+
+@router.delete(
+    "/mcp/servers/{server_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=_WRITE
+)
+async def delete_mcp_server(
+    server_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    server = await session.get(MCPServer, server_id)
+    if server is None:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    await session.delete(server)
+    await session.commit()
+    await _reload_mcp(request)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # --- audit log ---------------------------------------------------------------

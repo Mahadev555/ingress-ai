@@ -22,6 +22,10 @@ class KeyContext:
     name: str
     tenant_id: str
     allowed_models: list[str] = field(default_factory=list)
+    # MCP scoping: empty = all enabled servers / all their tools. allowed_tools
+    # holds namespaced "{server}__{tool}".
+    allowed_servers: list[str] = field(default_factory=list)
+    allowed_tools: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     token_budget: Optional[int] = None
     cost_budget_usd: Optional[float] = None
@@ -45,6 +49,15 @@ class KeyContext:
         if self.allowed_models and model not in self.allowed_models:
             return False
         if self.team_allowed_models and model not in self.team_allowed_models:
+            return False
+        return True
+
+    def may_use(self, server: str, tool: Optional[str] = None) -> bool:
+        """Whether this key may reach an MCP server (and optionally a specific
+        namespaced tool). Empty scope lists mean "no restriction"."""
+        if self.allowed_servers and server not in self.allowed_servers:
+            return False
+        if tool is not None and self.allowed_tools and tool not in self.allowed_tools:
             return False
         return True
 
@@ -167,6 +180,8 @@ async def resolve_key(session: AsyncSession, token: Optional[str]) -> Optional[K
         name=key.name,
         tenant_id=key.tenant_id,
         allowed_models=list(key.allowed_models or []),
+        allowed_servers=list(key.allowed_servers or []),
+        allowed_tools=list(key.allowed_tools or []),
         tags=list(key.tags or []),
         token_budget=key.token_budget,
         cost_budget_usd=key.cost_budget_usd,

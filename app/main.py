@@ -5,7 +5,7 @@ import httpx
 from fastapi import FastAPI, Request, Response
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.api import admin, chat
+from app.api import admin, chat, mcp
 from app.core.cache import create_cache
 from app.core.concurrency import ConcurrencyLimiter
 from app.core.config import get_settings
@@ -13,6 +13,7 @@ from app.core.model_registry import registry as model_registry
 from app.core.ratelimit import create_rate_limiter
 from app.db.seed import seed_credentials_if_empty, seed_models_if_empty
 from app.db.session import create_engine, init_models
+from app.mcp.registry import registry as mcp_registry
 from app.observability.logging import configure_logging
 from app.observability.metrics import render_latest
 from app.router.deployments import registry as deployment_registry
@@ -46,6 +47,9 @@ async def lifespan(app: FastAPI):
 
     await deployment_registry.reload(app.state.session_factory)
     app.state.deployment_registry = deployment_registry
+
+    await mcp_registry.reload(app.state.session_factory)
+    app.state.mcp_registry = mcp_registry
 
     app.state.rate_limiter = create_rate_limiter(settings)
     app.state.circuit_breaker = CircuitBreaker(
@@ -92,6 +96,7 @@ async def request_id_middleware(request: Request, call_next):
 
 app.include_router(chat.router, prefix="/v1")
 app.include_router(admin.router, prefix="/admin")
+app.include_router(mcp.router, prefix="/mcp")
 
 
 @app.get("/health")

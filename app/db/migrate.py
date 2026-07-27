@@ -27,10 +27,15 @@ def _additive_columns(dialect: str) -> dict[str, dict[str, str]]:
             "last_used_at": ts,
             "team_id": "INTEGER",
             "tags": json_type,
+            # MCP scoping.
+            "allowed_servers": json_type,
+            "allowed_tools": json_type,
         },
         "usage_records": {
             "trace_id": "VARCHAR(36)",
             "tags": json_type,
+            # Distinguishes LLM ("chat") from MCP tool ("tool") rows in one ledger.
+            "kind": "VARCHAR(16) NOT NULL DEFAULT 'chat'",
         },
         "audit_logs": {
             "conversation_id": "VARCHAR(64)",
