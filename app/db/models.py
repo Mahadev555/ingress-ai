@@ -54,6 +54,10 @@ class VirtualKey(Base):
     tags: Mapped[list] = mapped_column(JsonList, default=list)
     # Empty list means "any model is allowed".
     allowed_models: Mapped[list] = mapped_column(JsonList, default=list)
+    # MCP scoping (same convention as allowed_models): empty = all enabled
+    # servers / all their tools. allowed_tools holds namespaced "{server}__{tool}".
+    allowed_servers: Mapped[list] = mapped_column(JsonList, default=list)
+    allowed_tools: Mapped[list] = mapped_column(JsonList, default=list)
     token_budget: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # Cost budget in USD; enforced alongside token_budget within budget_period.
     cost_budget_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -139,6 +143,35 @@ class ModelDeployment(Base):
     )
 
 
+class MCPServer(Base):
+    """An upstream MCP server the gateway fronts. Mirrors ModelConfig: the DB is
+    the source of truth, refreshed into an in-memory registry on admin writes.
+
+    The gateway is an MCP server to clients and an MCP client to these upstreams.
+    `name` doubles as the tool namespace prefix ("github" -> "github__create_issue").
+    Upstream auth (auth_header/auth_value) stays server-side and is never returned
+    by the API — same guarantee as provider credential keys."""
+
+    __tablename__ = "mcp_servers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    url: Mapped[str] = mapped_column(String(512))
+    # v1 supports remote Streamable HTTP upstreams only.
+    transport: Mapped[str] = mapped_column(String(16), default="http")
+    # Optional upstream auth: e.g. auth_header="Authorization", auth_value="Bearer x".
+    # The value is encrypted at rest (see core.secrets) and never returned.
+    auth_header: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    auth_value: Mapped[str] = mapped_column(String(512), default="")
+    description: Mapped[str] = mapped_column(String(256), default="")
+    default_rate_limit_per_minute: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    default_max_concurrency: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class UsageRecord(Base):
     __tablename__ = "usage_records"
 
@@ -147,6 +180,9 @@ class UsageRecord(Base):
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
     # Spend-attribution tags (key tags merged with per-request X-Tags).
     tags: Mapped[list] = mapped_column(JsonList, default=list)
+    # "chat" (LLM request) or "tool" (MCP tool call) — one ledger for both. For
+    # tool calls, provider holds the server name and model holds the tool name.
+    kind: Mapped[str] = mapped_column(String(16), default="chat", index=True)
     provider: Mapped[str] = mapped_column(String(32))
     model: Mapped[str] = mapped_column(String(128))
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
