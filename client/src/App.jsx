@@ -6,6 +6,7 @@ import Teams from "./pages/Teams.jsx";
 import Models from "./pages/Models.jsx";
 import Providers from "./pages/Providers.jsx";
 import Deployments from "./pages/Deployments.jsx";
+import MCPServers from "./pages/MCPServers.jsx";
 import Playground from "./pages/Playground.jsx";
 import Usage from "./pages/Usage.jsx";
 import Audit from "./pages/Audit.jsx";
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="models" element={<Models />} />
         <Route path="providers" element={<Providers />} />
         <Route path="deployments" element={<Deployments />} />
+        <Route path="mcp-servers" element={<MCPServers />} />
         <Route path="playground" element={<Playground />} />
         <Route path="usage" element={<Usage />} />
         <Route path="audit" element={<Audit />} />

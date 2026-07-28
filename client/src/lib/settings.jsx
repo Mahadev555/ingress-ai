@@ -26,6 +26,7 @@ export function SettingsProvider({ children }) {
   // it has adapters for (the full supported palette). Fetched once per api.
   const [costTracking, setCostTracking] = useState(true);
   const [supportedProviders, setSupportedProviders] = useState([]);
+  const [mcpEnabled, setMcpEnabled] = useState(false);
   useEffect(() => {
     let alive = true;
     api
@@ -34,6 +35,7 @@ export function SettingsProvider({ children }) {
         if (!alive || !c) return;
         setCostTracking(c.cost_tracking_enabled !== false);
         setSupportedProviders(c.providers || []);
+        setMcpEnabled(c.mcp_enabled === true);
       })
       .catch(() => {});
     return () => {
@@ -52,6 +54,7 @@ export function SettingsProvider({ children }) {
     hasAdmin: Boolean(adminToken),
     costTracking,
     supportedProviders,
+    mcpEnabled,
   };
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
