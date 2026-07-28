@@ -98,6 +98,15 @@ export function createApi({ baseUrl = "", adminToken = "" } = {}) {
     deleteDeployment: (id) =>
       request(`${baseUrl}/admin/deployments/${id}`, { method: "DELETE", headers: admin() }),
 
+    // Admin — MCP servers (the MCP gateway registry)
+    listMcpServers: () => request(`${baseUrl}/admin/mcp/servers`, { headers: admin() }),
+    createMcpServer: (body) =>
+      request(`${baseUrl}/admin/mcp/servers`, { method: "POST", body, headers: admin() }),
+    updateMcpServer: (id, body) =>
+      request(`${baseUrl}/admin/mcp/servers/${id}`, { method: "PATCH", body, headers: admin() }),
+    deleteMcpServer: (id) =>
+      request(`${baseUrl}/admin/mcp/servers/${id}`, { method: "DELETE", headers: admin() }),
+
     // Admin — teams (tenancy)
     listTeams: () => request(`${baseUrl}/admin/teams`, { headers: admin() }),
     createTeam: (body) =>

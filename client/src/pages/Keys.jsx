@@ -26,6 +26,8 @@ const EMPTY_FORM = {
   team_id: "",
   tags: "",
   allowed_models: "",
+  allowed_servers: "",
+  allowed_tools: "",
   token_budget: "",
   cost_budget_usd: "",
   budget_period: "total",
@@ -42,6 +44,8 @@ function formFromKey(k) {
     team_id: k.team_id == null ? "" : String(k.team_id),
     tags: (k.tags || []).join(", "),
     allowed_models: (k.allowed_models || []).join(", "),
+    allowed_servers: (k.allowed_servers || []).join(", "),
+    allowed_tools: (k.allowed_tools || []).join(", "),
     token_budget: k.token_budget ?? "",
     cost_budget_usd: k.cost_budget_usd ?? "",
     budget_period: k.budget_period || "total",
@@ -62,6 +66,12 @@ function bodyFromForm(form, { withTenant = false } = {}) {
       : [],
     allowed_models: form.allowed_models
       ? form.allowed_models.split(",").map((s) => s.trim()).filter(Boolean)
+      : [],
+    allowed_servers: form.allowed_servers
+      ? form.allowed_servers.split(",").map((s) => s.trim()).filter(Boolean)
+      : [],
+    allowed_tools: form.allowed_tools
+      ? form.allowed_tools.split(",").map((s) => s.trim()).filter(Boolean)
       : [],
     token_budget: num(form.token_budget),
     cost_budget_usd: num(form.cost_budget_usd),
@@ -94,7 +104,7 @@ function CopyButton({ value }) {
 
 // Shared policy inputs used by both the create and edit modals.
 function KeyFields({ form, setForm, teams = [] }) {
-  const { costTracking } = useSettings();
+  const { costTracking, mcpEnabled } = useSettings();
   const set = (patch) => setForm({ ...form, ...patch });
   return (
     <>
@@ -120,6 +130,19 @@ function KeyFields({ form, setForm, teams = [] }) {
           onChange={(e) => set({ allowed_models: e.target.value })}
         />
       </Field>
+
+      {mcpEnabled && (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Allowed MCP servers" hint="Comma-separated. Empty = all servers.">
+            <Input placeholder="github, filesystem" value={form.allowed_servers}
+              onChange={(e) => set({ allowed_servers: e.target.value })} />
+          </Field>
+          <Field label="Allowed MCP tools" hint="Namespaced {server}__{tool}. Empty = all.">
+            <Input placeholder="github__create_issue" value={form.allowed_tools}
+              onChange={(e) => set({ allowed_tools: e.target.value })} />
+          </Field>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <Field label="Rate limit (req/min)" hint="Empty = global default.">
@@ -393,6 +416,9 @@ export default function Keys() {
                       {k.team_id != null && <Badge tone="violet">{teamName(k.team_id)}</Badge>}
                       {(k.tags || []).map((t) => (
                         <Badge key={t} tone="slate">#{t}</Badge>
+                      ))}
+                      {(k.allowed_servers || []).map((s) => (
+                        <Badge key={`srv-${s}`} tone="amber">mcp:{s}</Badge>
                       ))}
                     </div>
                   </td>
